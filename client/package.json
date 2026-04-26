@@ -4,15 +4,25 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "sepolia": "vite --mode sepolia",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@dojoengine/utils": "^1.8.4",
-    "starknet": "^9.4.2"
+    "@cartridge/connector": "^0.13.9",
+    "@cartridge/controller": "^0.13.9",
+    "@provable-games/denshokan-sdk": "^0.1.28",
+    "@starknet-react/chains": "5.0.1",
+    "@starknet-react/core": "^5.0.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "starknet": "8.5.2"
   },
   "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^5.1.4",
     "typescript": "^5.6.0",
-    "vite": "^5.4.0"
+    "vite": "^7.0.0"
   }
 }
