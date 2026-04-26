@@ -117,7 +117,7 @@ pub mod actions {
                 .initializer(
                     creator_address,
                     "zordle",
-                    "Lazy adversarial Wordle on Dojo. Six guesses, on-chain.",
+                    "A new 5-letter word every day. Six guesses to crack it. Same puzzle for everyone - climb the daily leaderboard.",
                     "zKorp",
                     "zKorp",
                     "Word Puzzle",
@@ -305,12 +305,16 @@ pub mod actions {
             // ---- Pick a uniform-random non-empty pattern via VRF ----
             let bucket_count: u32 = Bitmap::popcount(pattern_seen).into();
             assert(bucket_count > 0, Errors::NO_CANDIDATES);
-            // Salt encodes the (token_id, turn_number, guess word_id) so the
-            // pick is unique per guess. The client must also call
-            // request_random with this exact salt before our action in the
-            // multicall (otherwise consume_random reverts).
+            // Daily-challenge salt: every player on day X faces the same
+            // lazy-boss behaviour for the same (turn, guess), so leaderboards
+            // are directly comparable. token_id is intentionally NOT in the
+            // salt — divergence between players comes from the guesses they
+            // pick, not from per-player randomness. The client must call
+            // request_random with this exact same salt as the multicall
+            // preamble or consume_random will revert.
+            let day: u64 = get_block_timestamp() / 86400;
             let salt = poseidon_hash_span(
-                [token_id, game.guesses_used.into(), word_id.into()].span(),
+                [day.into(), game.guesses_used.into(), word_id.into()].span(),
             );
             let vrf_addr = self.vrf_address.read();
             let mix = random_from(vrf_addr, salt);

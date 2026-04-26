@@ -54,16 +54,18 @@ export const mintGame = async (account: AccountInterface) => {
   ]);
 };
 
-// Salt convention shared with the contract:
-//   salt = poseidon([token_id, guesses_used, word_id])
-// guesses_used == 0xFFFF for start_game (no guess yet); use 0 + 0 for the
-// salt so it's unique per token. The contract's start_game doesn't call
-// VRF, so the preamble is technically optional for that call, but we
-// include it for symmetry.
-const computeSalt = (tokenId: bigint, guessesUsed: number, wordId: number): bigint =>
+// Salt convention shared with the contract: salt = poseidon([day, turn, word_id]).
+// The contract derives `day = block_timestamp / 86400`. We approximate with
+// the wall clock — block timestamps are within a few seconds of UTC, so
+// the only edge case is a guess submitted right at midnight that lands in
+// the next day's block. If you see consume_random revert, retry — the next
+// block's day matches the new salt.
+const SECONDS_PER_DAY = 86_400n;
+const computeDay = (): bigint => BigInt(Math.floor(Date.now() / 1000)) / SECONDS_PER_DAY;
+const computeSalt = (day: bigint, guessesUsed: number, wordId: number): bigint =>
   BigInt(
     hash.computePoseidonHashOnElements([
-      tokenId,
+      day,
       BigInt(guessesUsed),
       BigInt(wordId),
     ]),
@@ -85,7 +87,7 @@ export const submitGuess = async (
   guessesUsed: number,
   wordId: number,
 ) => {
-  const salt = computeSalt(tokenId, guessesUsed, wordId);
+  const salt = computeSalt(computeDay(), guessesUsed, wordId);
   return account.execute([
     buildVrfRequestCall(ACTIONS_ADDRESS, salt),
     {
