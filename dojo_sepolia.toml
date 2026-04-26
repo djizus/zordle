@@ -1,0 +1,18 @@
+[world]
+name = "Zordle"
+description = "Lazy adversarial Wordle on Dojo (Sepolia v1)"
+seed = "zordle_sepolia_v1"
+
+[namespace]
+default = "zordle_0_1"
+
+[writers]
+"zordle_0_1" = ["zordle_0_1-actions", "zordle_0_1-setup"]
+
+[env]
+rpc_url = "https://api.cartridge.gg/x/starknet/sepolia"
+# account_address and private_key are intentionally omitted from this file.
+# The deploy script (scripts/deploy_sepolia.sh) reads DEPLOYER_ADDRESS and
+# DEPLOYER_PRIVATE_KEY from the shell environment and passes them as
+# --account-address / --private-key flags to sozo, so secrets never land in
+# version control.

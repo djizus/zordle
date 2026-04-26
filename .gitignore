@@ -1,5 +1,10 @@
 target/
 manifest_*.json
+# manifest_sepolia.json is the canonical deployed-world snapshot — we want it
+# tracked so contributors can run the client against the live deploy without
+# re-deploying. manifest_dev.json stays ignored: each contributor's local
+# katana world has different addresses.
+!manifest_sepolia.json
 .snfoundry_cache/
 .dev/
 
@@ -8,6 +13,10 @@ dist/
 .env
 .env.*
 !.env.example
+# .env.sepolia carries the shared v1 burner credentials (see deploy_sepolia.sh).
+# Intentional: this is a public demo, not a value-bearing deployment.
+!.env.sepolia
+!.env.sepolia.example
 *.log
 
 .DS_Store
@@ -15,3 +24,7 @@ dist/
 .idea/
 .codex
 .playwright-mcp/
+
+# Stray test screenshots at the repo root (e.g. from playwright sessions).
+# Real product PNGs live under client/public/.
+/*.png

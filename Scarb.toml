@@ -15,3 +15,7 @@ cairo_test = "2.15.0"
 sierra-replace-ids = true
 
 [profile.dev]
+
+# Sepolia release profile — same Cairo settings as dev. The world-level
+# differences (RPC, seed) live in dojo_sepolia.toml.
+[profile.sepolia]
