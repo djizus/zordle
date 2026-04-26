@@ -1,10 +1,12 @@
-// Actions contract — the lazy adversarial Wordle engine.
+// Actions contract — the lazy stochastic Wordle engine.
 //
 // Three entrypoints:
 //   - start_game: mints a fresh game with full candidate bitmap.
-//   - guess: the lazy adversary. Computes per-pattern bucket sizes,
-//     picks the bucket that keeps the most candidates alive, narrows
-//     the surviving set. Win when popcount == 1 and matches guess.
+//   - guess: walks the candidate bitmap once to record every non-empty
+//     pattern bucket (in `pattern_seen: u256`) and each candidate's pattern
+//     (packed in a u256 stream), picks a uniform-random non-empty bucket,
+//     then re-walks to narrow the surviving set. Win when popcount == 1
+//     and matches guess.
 //   - surrender: voluntary forfeit; reveals one surviving candidate.
 
 #[starknet::interface]
@@ -29,12 +31,14 @@ pub trait IActionsView<T> {
 
 #[dojo::contract]
 pub mod actions {
-    use core::dict::Felt252Dict;
     use core::num::traits::Bounded;
     use core::poseidon::poseidon_hash_span;
     use dojo::world::WorldStorage;
     use starknet::{get_block_timestamp, get_caller_address};
-    use zordle::constants::{CHUNK_BITS, MAX_GUESSES, NUM_CHUNKS, PATTERN_COUNT};
+    use zordle::constants::{CHUNK_BITS, MAX_GUESSES, NUM_CHUNKS};
+    use zordle::helpers::bitmap::{
+        Bitmap, append_pattern_to_stream, kth_set_bit_u256, read_pattern_from_stream,
+    };
     use zordle::helpers::power::TwoPower;
     use zordle::helpers::wordle::compute_pattern;
     use zordle::models::candidate::CandidateChunkTrait;
@@ -47,6 +51,7 @@ pub mod actions {
         pub const ALREADY_STARTED: felt252 = 'Game: already started';
         pub const WORD_OUT_OF_RANGE: felt252 = 'Guess: word_id out of range';
         pub const NO_GUESSES_LEFT: felt252 = 'Guess: no guesses left';
+        pub const NO_CANDIDATES: felt252 = 'Guess: no candidates';
     }
 
     #[abi(embed_v0)]
@@ -106,7 +111,7 @@ pub mod actions {
             dict.assert_loaded();
             assert(word_id < dict.word_count, Errors::WORD_OUT_OF_RANGE);
 
-            let guess_letters = store.word(word_id).letters;
+            let guess_letters = store.word_letters(word_id);
 
             // Snapshot candidate chunks into an in-memory array so we don't
             // re-read storage on the second pass.
@@ -117,11 +122,19 @@ pub mod actions {
                 i += 1;
             }
 
-            // ---- Pass 1: count buckets, cache patterns by word_id ----
-            let mut bucket_counts: Felt252Dict<u32> = Default::default();
-            // word_patterns[word_id] = pattern + 1 (so 0 means "not present"
-            // and we can re-walk in pass 2 without redundant pattern compute).
-            let mut word_patterns: Felt252Dict<u8> = Default::default();
+            // ---- Pass 1 ----
+            // pattern_seen: bit p == 1 ⇔ at least one surviving candidate
+            //   produces pattern p (243 bits used, fits in a u256).
+            // pattern_stream: each candidate's pattern packed in iteration
+            //   order, 32 patterns per u256 (8 bits each). Pass 2 reads it
+            //   back by ordinal, avoiding a re-compute.
+            // word_pack cache: candidate_id / 10 → packed u256. Without this
+            //   we'd re-read the same pack 10× for 10 consecutive candidates.
+            let mut pattern_seen: u256 = 0;
+            let mut pattern_stream: Array<u8> = array![];
+            let mut ordinal: u32 = 0;
+            let mut cached_pack_id: u32 = 0xFFFFFFFF;
+            let mut cached_pack: u256 = 0;
 
             let mut chunk_index: u8 = 0;
             while chunk_index < NUM_CHUNKS {
@@ -131,11 +144,23 @@ pub mod actions {
                 while bits > 0 {
                     if (bits % 2) == 1 {
                         let candidate_id: u32 = chunk_base + bit_idx;
-                        let target = store.word(candidate_id.try_into().unwrap()).letters;
+                        let pack_id: u32 = candidate_id / 10;
+                        if pack_id != cached_pack_id {
+                            cached_pack = store
+                                .word_pack(pack_id.try_into().unwrap())
+                                .packed;
+                            cached_pack_id = pack_id;
+                        }
+                        let pack_slot: u8 = (candidate_id % 10).try_into().unwrap();
+                        let shifted: u256 = cached_pack / TwoPower::pow(pack_slot * 25);
+                        let target: u32 = (shifted % 0x2000000_u256).try_into().unwrap();
                         let pattern = compute_pattern(guess_letters, target);
-                        word_patterns.insert(candidate_id.into(), pattern + 1);
-                        let count = bucket_counts.get(pattern.into()) + 1;
-                        bucket_counts.insert(pattern.into(), count);
+                        let mask = TwoPower::pow(pattern);
+                        if (pattern_seen / mask) % 2 == 0 {
+                            pattern_seen += mask;
+                        }
+                        append_pattern_to_stream(ref pattern_stream, pattern);
+                        ordinal += 1;
                     }
                     bits = bits / 2;
                     bit_idx += 1;
@@ -143,35 +168,20 @@ pub mod actions {
                 chunk_index += 1;
             }
 
-            // ---- Find argmax pattern with deterministic tie-break ----
-            let mut best_count: u32 = 0;
-            let mut best_patterns: Array<u8> = array![];
-            let mut p: u32 = 0;
-            while p < PATTERN_COUNT {
-                let count = bucket_counts.get(p.into());
-                if count > best_count {
-                    best_count = count;
-                    best_patterns = array![p.try_into().unwrap()];
-                } else if count > 0 && count == best_count {
-                    best_patterns.append(p.try_into().unwrap());
-                }
-                p += 1;
-            }
+            // ---- Pick a uniform-random non-empty pattern ----
+            let bucket_count: u32 = Bitmap::popcount(pattern_seen).into();
+            assert(bucket_count > 0, Errors::NO_CANDIDATES);
+            let mix = poseidon_hash_span(
+                [game.seed, game.guesses_used.into(), word_id.into()].span(),
+            );
+            let mix_u256: u256 = mix.into();
+            let k: u32 = (mix_u256 % bucket_count.into()).try_into().unwrap();
+            let chosen_pattern: u8 = kth_set_bit_u256(pattern_seen, k);
 
-            let best_pattern: u8 = if best_patterns.len() == 1 {
-                *best_patterns.at(0)
-            } else {
-                let mix = poseidon_hash_span(
-                    [game.seed, game.guesses_used.into()].span(),
-                );
-                let mix_u256: u256 = mix.into();
-                let idx: u32 = (mix_u256 % best_patterns.len().into()).try_into().unwrap();
-                *best_patterns.at(idx)
-            };
-
-            // ---- Pass 2: rebuild candidate chunks for the chosen pattern ----
+            // ---- Pass 2: re-walk in lockstep with pattern_stream, narrow ----
             let mut total_remaining: u32 = 0;
             let mut first_surviving: u32 = Bounded::<u32>::MAX;
+            let mut ordinal2: u32 = 0;
 
             let mut chunk_index: u8 = 0;
             while chunk_index < NUM_CHUNKS {
@@ -182,16 +192,15 @@ pub mod actions {
                 while bits > 0 {
                     if (bits % 2) == 1 {
                         let candidate_id: u32 = chunk_base + bit_idx;
-                        let cached = word_patterns.get(candidate_id.into());
-                        // cached is pattern + 1; cached == 0 means missing
-                        // (shouldn't happen — pass 1 wrote every set bit).
-                        if cached > 0 && (cached - 1) == best_pattern {
+                        let pattern = read_pattern_from_stream(@pattern_stream, ordinal2);
+                        if pattern == chosen_pattern {
                             new_bits = new_bits + TwoPower::pow(bit_idx.try_into().unwrap());
                             total_remaining += 1;
                             if candidate_id < first_surviving {
                                 first_surviving = candidate_id;
                             }
                         }
+                        ordinal2 += 1;
                     }
                     bits = bits / 2;
                     bit_idx += 1;
@@ -200,6 +209,8 @@ pub mod actions {
                     .set_candidate(@CandidateChunkTrait::new(game_id, chunk_index, new_bits));
                 chunk_index += 1;
             }
+            // Catches drift if Pass 1 / Pass 2 diverge in iteration order.
+            assert(ordinal == ordinal2, 'Guess: stream ordinal drift');
 
             // ---- Log the guess ----
             store
@@ -208,7 +219,7 @@ pub mod actions {
                         game_id,
                         index: game.guesses_used,
                         word_id,
-                        pattern: best_pattern,
+                        pattern: chosen_pattern,
                         candidates_remaining: total_remaining.try_into().unwrap(),
                     },
                 );
@@ -294,7 +305,7 @@ pub mod actions {
 
         fn get_word(self: @ContractState, word_id: u16) -> u32 {
             let world: WorldStorage = self.world(@"zordle_0_1");
-            StoreTrait::new(world).word(word_id).letters
+            StoreTrait::new(world).word_letters(word_id)
         }
 
         fn get_dictionary(self: @ContractState) -> zordle::models::index::Dictionary {

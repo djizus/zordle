@@ -19,14 +19,18 @@ pub struct Dictionary {
     pub loaded: bool,
 }
 
-// One row per dictionary word. `letters` packs 5 letter codes (a=0..z=25)
-// into 5-bit slots inside a u32 (25 bits used).
+// One row per pack of up to 10 dictionary words. Each word packs 5 letter
+// codes (a=0..z=25) into 5-bit slots inside 25 bits; ten such 25-bit slots
+// fit into a u256 (250 bits used). pack_id = word_id / 10, slot in pack =
+// word_id % 10. The trailing pack may have unused (zero-padded) slots beyond
+// `dict.word_count`; callers must gate on `word_id < word_count` before
+// reading.
 #[derive(Copy, Drop, Serde)]
 #[dojo::model]
-pub struct Word {
+pub struct WordPack {
     #[key]
     pub id: u16,
-    pub letters: u32,
+    pub packed: u256,
 }
 
 // One row per active game.

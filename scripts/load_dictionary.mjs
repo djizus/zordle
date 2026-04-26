@@ -13,8 +13,10 @@
 // (word_ids A..A+G-1 = allowed-only). Calls finalize_dictionary(total, A).
 //
 // Pack format: 5 letters per word, 5 bits per letter (a=0..z=25), packed
-// into a u32. Comment lines starting with '#' are skipped. Words are
-// lowercased and validated against /^[a-z]{5}$/.
+// into 25 bits. Ten such 25-bit slots are concatenated into a u256 (250
+// bits used) and stored as one WordPack row. The contract's setup expects
+// pre-packed u256 packs via `load_word_packs`. Comment lines starting with
+// '#' are skipped. Words are lowercased and validated against /^[a-z]{5}$/.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -83,6 +85,24 @@ function packWord(word) {
   return packed;
 }
 
+// Pack 10 consecutive words into one u256: each word in its own 25-bit slot
+// at position `i * 25`. Trailing positions are zero (decode to "aaaaa" but
+// never read because callers gate on word_id < dict.word_count).
+function packWords10(words) {
+  let pack = 0n;
+  for (let i = 0; i < words.length; i++) {
+    const w = packWord(words[i]);
+    pack += w << BigInt(i * 25);
+  }
+  return pack;
+}
+
+// starknet.js u256 calldata format is { low, high } 128-bit halves.
+function toU256(x) {
+  const MASK = (1n << 128n) - 1n;
+  return { low: (x & MASK).toString(), high: (x >> 128n).toString() };
+}
+
 const provider = new RpcProvider({ nodeUrl: RPC });
 const account = new Account({
   provider,
@@ -90,18 +110,27 @@ const account = new Account({
   signer: PRIVKEY,
 });
 
-const BATCH = 500;
+// Pack words into u256 packs (10 words per pack).
+const PACK_SIZE = 10;
+const packs = [];
+for (let i = 0; i < allWords.length; i += PACK_SIZE) {
+  packs.push(packWords10(allWords.slice(i, i + PACK_SIZE)));
+}
+const PACK_COUNT = packs.length;
+console.log(`packs       : ${PACK_COUNT.toString().padStart(6)} (10 words each)`);
+
+// Each batch of ~50 packs = 500 words, similar calldata size to the old loader.
+const PACK_BATCH = 50;
 const t0 = Date.now();
-for (let i = 0; i < allWords.length; i += BATCH) {
-  const batch = allWords.slice(i, i + BATCH);
-  const packed = batch.map(packWord);
+for (let i = 0; i < packs.length; i += PACK_BATCH) {
+  const batch = packs.slice(i, i + PACK_BATCH).map(toU256);
   process.stdout.write(
-    `  batch ${String(i).padStart(5)}..${String(i + batch.length - 1).padStart(5)}... `,
+    `  packs ${String(i).padStart(4)}..${String(i + batch.length - 1).padStart(4)}... `,
   );
   const { transaction_hash } = await account.execute({
     contractAddress: SETUP_ADDR,
-    entrypoint: "load_words",
-    calldata: CallData.compile([i, packed]),
+    entrypoint: "load_word_packs",
+    calldata: CallData.compile([i, batch]),
   });
   await provider.waitForTransaction(transaction_hash);
   console.log("ok");

@@ -64,9 +64,48 @@ impl Private of PrivateTrait {
     }
 }
 
+// Find the position of the k-th set bit (0-indexed) in a u256.
+// Used by the lazy boss to pick a uniform-random non-empty pattern bucket.
+pub fn kth_set_bit_u256(x: u256, k: u32) -> u8 {
+    let mut remaining: u32 = k;
+    let mut bit_idx: u32 = 0;
+    let mut bits: u256 = x;
+    let mut found: bool = false;
+    let mut result: u8 = 0;
+    while bits > 0 && !found {
+        if (bits % 2) == 1 {
+            if remaining == 0 {
+                result = bit_idx.try_into().unwrap();
+                found = true;
+            } else {
+                remaining -= 1;
+            }
+        }
+        if !found {
+            bits = bits / 2;
+            bit_idx += 1;
+        }
+    }
+    assert(found, 'kth_set_bit: out of range');
+    result
+}
+
+// Plain Array<u8> stream of patterns. We tried packing 32 patterns × 8 bits
+// per u256 (and a TwoPower-based shift/mask round-trip) but the u256 mul/div
+// in the hot loop was net-negative vs the cost of one felt per pattern.
+pub fn append_pattern_to_stream(ref stream: Array<u8>, pattern: u8) {
+    stream.append(pattern);
+}
+
+pub fn read_pattern_from_stream(stream: @Array<u8>, ordinal: u32) -> u8 {
+    *stream.at(ordinal)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Bitmap;
+    use super::{
+        Bitmap, append_pattern_to_stream, kth_set_bit_u256, read_pattern_from_stream,
+    };
 
     #[test]
     fn test_bitmap_popcount_large() {
@@ -98,5 +137,38 @@ mod tests {
     fn test_bitmap_unset() {
         let bit: u256 = Bitmap::unset(0b1001011_u256, 0);
         assert_eq!(bit, 0b1001010);
+    }
+
+    #[test]
+    fn test_kth_set_bit_low_bits() {
+        // 0b10110 has bits set at positions 1, 2, 4.
+        assert_eq!(kth_set_bit_u256(0b10110_u256, 0), 1);
+        assert_eq!(kth_set_bit_u256(0b10110_u256, 1), 2);
+        assert_eq!(kth_set_bit_u256(0b10110_u256, 2), 4);
+    }
+
+    #[test]
+    fn test_kth_set_bit_high_bit() {
+        // Only bit 242 set: 2^242 = 4 * 16^60, so "4" followed by 60 zeros.
+        let x: u256 = 0x4000000000000000000000000000000000000000000000000000000000000_u256;
+        assert_eq!(kth_set_bit_u256(x, 0), 242);
+    }
+
+    #[test]
+    fn test_pattern_stream_round_trip() {
+        let mut stream: Array<u8> = array![];
+        let mut i: u32 = 0;
+        while i < 100 {
+            let pattern: u8 = ((i * 17) % 243).try_into().unwrap();
+            append_pattern_to_stream(ref stream, pattern);
+            i += 1;
+        }
+
+        let mut j: u32 = 0;
+        while j < 100 {
+            let expected: u8 = ((j * 17) % 243).try_into().unwrap();
+            assert_eq!(read_pattern_from_stream(@stream, j), expected);
+            j += 1;
+        }
     }
 }
