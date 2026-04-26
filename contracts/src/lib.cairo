@@ -1,10 +1,15 @@
 pub mod constants;
 pub mod store;
 
+pub mod interfaces {
+    pub mod vrf;
+}
+
 pub mod helpers {
     pub mod power;
     pub mod bitmap;
     pub mod wordle;
+    pub mod random;
 }
 
 pub mod models {

@@ -9,14 +9,13 @@ pub mod Errors {
 
 #[generate_trait]
 pub impl GameImpl of GameTrait {
-    fn new(id: felt252, player: ContractAddress, seed: felt252) -> Game {
+    fn new(id: felt252, player: ContractAddress) -> Game {
         Game {
             id,
             player,
             started_at: starknet::get_block_timestamp(),
             ended_at: 0,
             guesses_used: 0,
-            seed,
             won: false,
             final_word_id: 0,
         }

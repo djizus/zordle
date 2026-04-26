@@ -33,11 +33,15 @@ pub struct WordPack {
     pub packed: u256,
 }
 
-// One row per active game.
+// One row per active game. The `id` is the Denshokan token_id minted at
+// game start — it doubles as the game key and the on-chain leaderboard
+// reference.
 //   - `started_at == 0` means "doesn't exist" (Dojo returns zero default).
 //   - `ended_at != 0` means the game is over (won or lost).
 //   - `final_word_id` is set on game end to whichever word the contract
 //     reveals (the surviving candidate, or any if multiple still remain).
+//   - No `seed` field — randomness comes from Cartridge VRF (Sepolia/
+//     Mainnet) or pseudo-random tx-info hash (local katana).
 #[derive(Copy, Drop, Serde)]
 #[dojo::model]
 pub struct Game {
@@ -47,7 +51,6 @@ pub struct Game {
     pub started_at: u64,
     pub ended_at: u64,
     pub guesses_used: u8,
-    pub seed: felt252,
     pub won: bool,
     pub final_word_id: u16,
 }
