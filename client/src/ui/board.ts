@@ -12,11 +12,12 @@ export function renderBoard(
   past: PastGuess[],
   active: string,
   message: string,
+  flipRowIndex: number = -1,
 ): string {
   const rows: string[] = [];
   for (let r = 0; r < MAX_GUESSES; r++) {
     if (r < past.length) {
-      rows.push(filledRow(past[r]));
+      rows.push(filledRow(past[r], r === flipRowIndex));
     } else if (r === past.length) {
       rows.push(activeRow(active));
     } else {
@@ -29,14 +30,14 @@ export function renderBoard(
   `;
 }
 
-function filledRow(g: PastGuess): string {
+function filledRow(g: PastGuess, fresh: boolean): string {
   const trits = decodePattern(g.pattern);
   const cells = [];
   for (let i = 0; i < WORD_LENGTH; i++) {
     const letter = (g.word[i] ?? "").toUpperCase();
     cells.push(`<div class="cell ${trits[i]}">${letter}</div>`);
   }
-  return `<div class="row">${cells.join("")}</div>`;
+  return `<div class="row${fresh ? " fresh" : ""}">${cells.join("")}</div>`;
 }
 
 function activeRow(text: string): string {

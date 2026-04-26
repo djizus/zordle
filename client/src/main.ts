@@ -38,6 +38,10 @@ type SavedRun = {
 const RUN_KEY = "zordle:active-run:v1";
 const CANDIDATE_CHUNKS = 10;
 
+// One-shot row index to flip with the reveal animation. -1 means "no row".
+// Set when a guess is just confirmed, consumed by the next render call.
+let flipOnce = -1;
+
 const state: AppState = {
   phase: "loading",
   words: [],
@@ -98,7 +102,7 @@ function restoreRun(): boolean {
     state.gameId = BigInt(saved.gameId);
     state.past = saved.past;
     state.active = saved.active ?? "";
-    state.message = saved.message || `${state.words.length} words remaining`;
+    state.message = saved.message || `guess <span class="accent">1</span> of 6`;
     state.phase = "playing";
     state.won = false;
     state.finalWord = "";
@@ -115,8 +119,9 @@ function restoreRun(): boolean {
 function renderHeader(): string {
   return `
     <header class="site-header">
-      <h1>zordle</h1>
-      <p class="brandline">by zkorp · onchain word puzzle</p>
+      <div class="cube-mark" aria-hidden="true"></div>
+      <h1 class="wordmark">z<span class="accent">o</span>rdle</h1>
+      <p class="brandline">zkorp<span class="dot">·</span>onchain</p>
     </header>
   `;
 }
@@ -135,7 +140,7 @@ function renderRemainingCarousel(): string {
   const trackWords = state.remainingWords.length > 3 ? `${words}${words}` : words;
   return `
     <section class="candidate-strip" aria-label="remaining candidate words">
-      <div class="candidate-label">${state.remainingWords.length} remaining</div>
+      <div class="candidate-label"><span class="count">${state.remainingWords.length}</span> remaining</div>
       <div class="candidate-window">
         <div class="${trackClass}">${trackWords}</div>
       </div>
@@ -227,13 +232,16 @@ async function restoreRunAndRefresh(): Promise<boolean> {
 function render() {
   switch (state.phase) {
     case "loading":
-      root.innerHTML = `${renderHeader()}<p>loading…</p>`;
+      root.innerHTML = `${renderHeader()}<p class="loading">syncing chain</p>`;
       return;
     case "splash":
       root.innerHTML = `
         ${renderHeader()}
-        <p class="subtitle">Lazy adversarial Wordle on Dojo. ${state.words.length} words.</p>
-        <button id="start">Start game</button>
+        <section class="splash">
+          <p class="splash-tagline">A <em>lazy</em> adversary picks the worst feedback you can prove. Six guesses. Onchain.</p>
+          <button id="start" class="btn-primary">Start game</button>
+          <p class="splash-meta"><strong>${state.words.length.toLocaleString()}</strong> words · 2,315 answers · Dojo + Starknet</p>
+        </section>
       `;
       document
         .getElementById("start")!
@@ -242,18 +250,21 @@ function render() {
     case "playing":
       root.innerHTML = `
         ${renderHeader()}
-        ${renderBoard(state.past, state.active, state.message)}
+        ${renderBoard(state.past, state.active, state.message, flipOnce)}
         ${renderRemainingCarousel()}
         ${renderKeyboard(state.past)}
       `;
+      flipOnce = -1;
       bindKeyboard();
       return;
-    case "ending":
+    case "ending": {
+      const score = state.won ? `${state.past.length}/6` : "X/6";
       root.innerHTML = `
         ${renderHeader()}
-        ${renderBoard(state.past, "", state.message)}
+        ${renderBoard(state.past, "", `score · <span class="accent">${score}</span>`, flipOnce)}
         ${renderEnd(state.won, state.finalWord)}
       `;
+      flipOnce = -1;
       document
         .getElementById("play-again")!
         .addEventListener("click", onStart);
@@ -261,6 +272,7 @@ function render() {
         .getElementById("share-result")!
         .addEventListener("click", onShare);
       return;
+    }
   }
 }
 
@@ -322,7 +334,7 @@ async function onStart() {
   render();
   try {
     await startGame(state.gameId);
-    state.message = `${state.words.length} words remaining`;
+    state.message = `guess <span class="accent">1</span> of 6`;
     await refreshRemainingWords();
   } catch (err) {
     state.message = `Error: ${(err as Error).message}`;
@@ -376,7 +388,8 @@ async function onSubmit() {
     }
     state.active = "";
     state.past.push({ word: submitted, pattern: guess.pattern });
-    state.message = `${guess.candidatesRemaining} words remaining`;
+    flipOnce = state.past.length - 1;
+    state.message = `guess <span class="accent">${state.past.length}</span> of 6 · proof accepted`;
     state.txPending = false;
     if (game.endedAt !== 0n) {
       state.won = game.won;

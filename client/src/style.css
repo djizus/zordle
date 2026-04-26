@@ -1,88 +1,340 @@
-:root {
-  --zk-teal: #1D9E75;
-  --zk-teal-dk: #0F6E56;
-  --zk-amber: #EF9F27;
-  --zk-stone: #888780;
-  --zk-bg: #F1EFE8;
-  --zk-ink: #2C2C2A;
-  --zk-canvas: var(--zk-bg);
-  --zk-text: var(--zk-ink);
-  --zk-muted: rgba(44, 44, 42, 0.68);
-  --zk-border: rgba(44, 44, 42, 0.24);
-  --zk-panel: rgba(255, 255, 255, 0.34);
+/* -----------------------------------------------------------------------
+   ZORDLE — zkorp's onchain Wordle.
+   Aesthetic: Wordle's tile clarity, dimensionalized for the zkorp arcade.
+   Dark navy canvas, pure-white tiles, sky-blue accent, hand-painted display.
+   ----------------------------------------------------------------------- */
 
-  font-family: Inter, system-ui, -apple-system, sans-serif;
-  color-scheme: light;
-  background: var(--zk-canvas);
-  color: var(--zk-text);
+@font-face {
+  font-family: "Fredericka the Great";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/FrederickatheGreat-Regular.ttf") format("truetype");
+}
+
+:root {
+  /* surface */
+  --bg-deep:        #07070F;
+  --bg-elev:        #14142A;
+  --bg-tint:        #1A1B36;
+
+  /* ink */
+  --ink:            #F4F5FF;
+  --ink-2:          rgba(244, 245, 255, 0.86);
+  --muted:          rgba(244, 245, 255, 0.50);
+  --faint:          rgba(244, 245, 255, 0.32);
+  --hairline:       rgba(244, 245, 255, 0.10);
+
+  /* zkorp accent */
+  --accent:         #A9D8FF;
+  --accent-deep:    #5DA9F5;
+  --accent-glow:    rgba(169, 216, 255, 0.45);
+
+  /* wordle tile palette (dark mode) */
+  --tile-empty-bg:      transparent;
+  --tile-empty-border:  rgba(244, 245, 255, 0.16);
+  --tile-filled-bg:     transparent;
+  --tile-filled-border: rgba(244, 245, 255, 0.55);
+  --green:              #538D4E;
+  --yellow:             #B59F3B;
+  --absent:             #3A3A3C;
+  --absent-soft:        rgba(58, 58, 60, 0.85);
+
+  /* radial gradient for the page atmosphere */
+  --aurora:
+    radial-gradient(1200px 700px at 50% -200px,
+      rgba(169, 216, 255, 0.12) 0%,
+      rgba(169, 216, 255, 0.03) 35%,
+      transparent 65%),
+    radial-gradient(900px 600px at 80% 110%,
+      rgba(93, 169, 245, 0.08) 0%,
+      transparent 60%);
+
+  font-family: "Outfit", system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+  background: var(--bg-deep);
+  color: var(--ink);
 }
 
 * { box-sizing: border-box; }
+
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   justify-content: center;
-  background: var(--zk-canvas);
-  color: var(--zk-text);
+  background: var(--bg-deep);
+  color: var(--ink);
   font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* atmospheric layers — sit fixed behind everything */
+.bg-aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background: var(--aurora);
+  pointer-events: none;
+  animation: aurora-drift 14s ease-in-out infinite alternate;
+}
+
+.bg-grain {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.45;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.06 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  mix-blend-mode: overlay;
+}
+
+@keyframes aurora-drift {
+  0%   { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(-2%, 1.5%, 0); }
 }
 
 #app {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 12px;
+  padding: 28px 16px 32px;
   width: 100%;
   max-width: 480px;
+  position: relative;
 }
+
+/* =====================================================================
+   HEADER — wordmark + zkorp watermark
+   ===================================================================== */
 
 .site-header {
-  margin: 0 0 18px;
-  text-align: center;
+  width: 100%;
+  margin: 0 0 22px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  position: relative;
 }
 
-h1 {
+.site-header::after {
+  content: "";
+  grid-column: 1 / -1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--hairline), transparent);
+  margin-top: 14px;
+}
+
+.cube-mark {
+  width: 38px;
+  height: 38px;
+  background: url("/zkorp-cube.png") center / contain no-repeat;
+  filter: drop-shadow(0 0 14px var(--accent-glow));
+  opacity: 0.92;
+}
+
+.wordmark {
   margin: 0;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 30px;
-  letter-spacing: -0.06em;
-  font-weight: 500;
+  font-family: "Fredericka the Great", "Outfit", serif;
+  font-weight: 400;
+  font-size: clamp(40px, 9vw, 56px);
+  line-height: 0.9;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  text-align: center;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06),
+    0 6px 24px rgba(169, 216, 255, 0.18);
   text-transform: lowercase;
+  user-select: none;
+}
+
+.wordmark .accent {
+  color: var(--accent);
+  text-shadow: 0 0 18px var(--accent-glow);
 }
 
 .brandline {
-  margin: 6px 0 0;
-  color: var(--zk-muted);
-  font-size: 13px;
-  font-weight: 400;
-}
-
-.subtitle {
-  margin: 0 0 24px;
-  color: var(--zk-muted);
-  font-size: 13px;
-}
-
-button {
-  background: var(--zk-teal-dk);
-  color: #fff;
-  border: none;
-  padding: 12px 24px;
-  font-size: 16px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
   font-weight: 500;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 120ms;
+  letter-spacing: 0.32em;
+  color: var(--muted);
+  text-transform: uppercase;
+  text-align: right;
+  white-space: nowrap;
 }
-button:hover { background: var(--zk-teal); }
-button:disabled { background: var(--zk-stone); cursor: not-allowed; }
+
+.brandline .dot {
+  color: var(--accent);
+  margin: 0 6px;
+}
+
+/* =====================================================================
+   SPLASH
+   ===================================================================== */
+
+.splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  padding: 32px 8px;
+  text-align: center;
+  animation: fade-up 600ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.splash-tagline {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  max-width: 28ch;
+}
+
+.splash-tagline em {
+  font-family: "Fredericka the Great", serif;
+  font-style: normal;
+  color: var(--accent);
+  font-size: 1.18em;
+  margin: 0 0.05em;
+}
+
+.splash-meta {
+  margin: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+.splash-meta strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* =====================================================================
+   BUTTONS — arcade-style with zkorp accent
+   ===================================================================== */
+
+.btn-primary,
+button#start,
+button#play-again {
+  appearance: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px 32px;
+  border: 1px solid rgba(169, 216, 255, 0.4);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, var(--accent) 0%, var(--accent) 76%, var(--accent-deep) 100%);
+  color: #051226;
+  font-family: "Outfit", sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  box-shadow:
+    0 8px 0 rgba(93, 169, 245, 0.35),
+    0 14px 32px -10px var(--accent-glow),
+    inset 0 2px 0 rgba(255, 255, 255, 0.55);
+  transition:
+    transform 90ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 160ms ease;
+  overflow: hidden;
+}
+
+.btn-primary::before,
+button#start::before,
+button#play-again::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.btn-primary:hover,
+button#start:hover,
+button#play-again:hover {
+  box-shadow:
+    0 6px 0 rgba(93, 169, 245, 0.4),
+    0 18px 38px -10px var(--accent-glow),
+    inset 0 2px 0 rgba(255, 255, 255, 0.6);
+}
+
+.btn-primary:active,
+button#start:active,
+button#play-again:active {
+  transform: translateY(2px);
+  box-shadow:
+    0 4px 0 rgba(93, 169, 245, 0.4),
+    0 10px 22px -10px var(--accent-glow),
+    inset 0 2px 0 rgba(255, 255, 255, 0.45);
+}
+
+.btn-ghost,
+button#share-result {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--ink-2);
+  padding: 14px 28px;
+  border-radius: 14px;
+  font-family: "Outfit", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+.btn-ghost:hover,
+button#share-result:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(169, 216, 255, 0.04);
+}
+
+/* =====================================================================
+   STATUS LINE
+   ===================================================================== */
+
+.status {
+  margin: 0 0 16px;
+  min-height: 22px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.status .ink { color: var(--ink); }
+.status .accent { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* =====================================================================
+   BOARD — Wordle-grade tile grid
+   ===================================================================== */
 
 .board {
   display: grid;
   grid-template-rows: repeat(6, 1fr);
   gap: 6px;
-  margin-bottom: 16px;
+  margin: 0 auto 18px;
+  width: min(348px, 90vw);
 }
 
 .row {
@@ -92,57 +344,111 @@ button:disabled { background: var(--zk-stone); cursor: not-allowed; }
 }
 
 .cell {
-  width: 60px;
-  height: 60px;
-  border: 2px solid var(--zk-border);
+  aspect-ratio: 1 / 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
-  font-weight: 500;
+  font-family: "Outfit", sans-serif;
+  font-size: clamp(26px, 6.5vw, 32px);
+  font-weight: 800;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
-  background: var(--zk-panel);
-  color: var(--zk-text);
+  color: var(--ink);
+  background: var(--tile-empty-bg);
+  border: 2px solid var(--tile-empty-border);
+  border-radius: 4px;
+  user-select: none;
+  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-color 120ms ease;
 }
 
-.cell.filled { background: var(--zk-stone); border-color: var(--zk-stone); color: #fff; }
-.cell.grey { background: var(--zk-ink); border-color: var(--zk-ink); color: var(--zk-bg); }
-.cell.yellow { background: var(--zk-amber); border-color: var(--zk-amber); color: var(--zk-ink); }
-.cell.green { background: var(--zk-teal); border-color: var(--zk-teal); color: #fff; }
-
-.status {
-  margin-bottom: 12px;
-  font-size: 14px;
-  color: var(--zk-muted);
-  min-height: 20px;
+.cell.filled {
+  background: var(--tile-filled-bg);
+  border-color: var(--tile-filled-border);
 }
+
+.cell.grey,
+.cell.yellow,
+.cell.green {
+  color: #fff;
+  border: none;
+}
+
+.cell.grey   { background: var(--absent); }
+.cell.yellow { background: var(--yellow); }
+.cell.green  { background: var(--green); }
+
+/* Flip animation is one-shot, scoped to the row that was just submitted
+   (.row.fresh). Past rows render their final colors statically. */
+.row.fresh > .cell.grey,
+.row.fresh > .cell.yellow,
+.row.fresh > .cell.green {
+  animation: flip 600ms cubic-bezier(0.5, 0, 0.5, 1) both;
+}
+
+.row.fresh > .cell:nth-child(1) { animation-delay: 0ms; }
+.row.fresh > .cell:nth-child(2) { animation-delay: 100ms; }
+.row.fresh > .cell:nth-child(3) { animation-delay: 200ms; }
+.row.fresh > .cell:nth-child(4) { animation-delay: 300ms; }
+.row.fresh > .cell:nth-child(5) { animation-delay: 400ms; }
+
+@keyframes flip {
+  0%   { transform: rotateX(0); }
+  45%  { transform: rotateX(-90deg); background: var(--bg-elev); border-color: var(--tile-filled-border); color: var(--ink); }
+  55%  { transform: rotateX(-90deg); }
+  100% { transform: rotateX(0); }
+}
+
+@keyframes pop {
+  0%   { transform: scale(0.94); }
+  60%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+/* =====================================================================
+   CANDIDATE STRIP — onchain ticker
+   ===================================================================== */
 
 .candidate-strip {
   width: 100%;
-  margin: -4px 0 14px;
-  overflow: hidden;
+  margin: -2px 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .candidate-label {
-  margin: 0 0 6px;
-  color: var(--zk-muted);
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 11px;
+  margin: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  color: var(--faint);
+  text-transform: uppercase;
   text-align: center;
 }
 
+.candidate-label .count {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .candidate-window {
+  position: relative;
   overflow: hidden;
-  border-top: 1px solid var(--zk-border);
-  border-bottom: 1px solid var(--zk-border);
-  padding: 8px 0;
+  padding: 9px 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12%, #000 88%, transparent 100%);
+          mask-image: linear-gradient(90deg, transparent 0, #000 12%, #000 88%, transparent 100%);
 }
 
 .candidate-track {
   display: inline-flex;
   width: max-content;
-  gap: 8px;
-  animation: candidate-scroll 300s linear infinite;
+  gap: 22px;
+  animation: candidate-scroll 240s linear infinite;
 }
 
 .candidate-track.static {
@@ -153,82 +459,230 @@ button:disabled { background: var(--zk-stone); cursor: not-allowed; }
 
 .candidate-word {
   flex: 0 0 auto;
-  color: var(--zk-muted);
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: var(--muted);
   text-transform: uppercase;
 }
+
+@keyframes candidate-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* =====================================================================
+   KEYBOARD
+   ===================================================================== */
 
 .keyboard {
   display: flex;
   flex-direction: column;
   gap: 6px;
   width: 100%;
-  margin-top: 8px;
+  margin-top: 10px;
 }
-.kb-row { display: flex; justify-content: center; gap: 4px; }
+
+.kb-row { display: flex; justify-content: center; gap: 5px; }
+
 .key {
-  background: var(--zk-stone);
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 14px 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
+  appearance: none;
   flex: 1;
-  max-width: 36px;
+  max-width: 38px;
+  height: 52px;
+  background: rgba(244, 245, 255, 0.10);
+  color: var(--ink);
+  border: 1px solid rgba(244, 245, 255, 0.06);
+  border-radius: 6px;
+  padding: 0 4px;
+  font-family: "Outfit", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  cursor: pointer;
+  transition: background 110ms ease, transform 60ms ease, color 110ms ease;
+  user-select: none;
 }
-.key.wide { max-width: 66px; flex: 1.6; font-size: 11px; }
+
+.key:hover { background: rgba(244, 245, 255, 0.18); }
+.key:active { transform: translateY(1px); }
+
+.key.wide {
+  max-width: 72px;
+  flex: 1.55;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+}
+
+.key.grey   { background: var(--absent);      color: rgba(255, 255, 255, 0.7); border: none; }
+.key.yellow { background: var(--yellow);      color: #fff;                     border: none; }
+.key.green  { background: var(--green);       color: #fff;                     border: none; }
+
 .key.prove {
-  background: var(--zk-teal-dk);
-  color: #ecfdf5;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  letter-spacing: 0.14em;
+  background:
+    linear-gradient(180deg, var(--accent) 0%, var(--accent) 78%, var(--accent-deep) 100%);
+  color: #051226;
+  border: 1px solid rgba(169, 216, 255, 0.5);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  box-shadow:
+    0 4px 0 rgba(93, 169, 245, 0.45),
+    0 10px 22px -10px var(--accent-glow),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.6);
 }
-.key:hover { background: var(--zk-teal); }
-.key.prove:hover { background: var(--zk-teal); }
-.key.grey { background: var(--zk-ink); color: var(--zk-bg); }
-.key.yellow { background: var(--zk-amber); color: var(--zk-ink); }
-.key.green { background: var(--zk-teal); color: #fff; }
+
+.key.prove:hover {
+  box-shadow:
+    0 3px 0 rgba(93, 169, 245, 0.5),
+    0 12px 28px -10px var(--accent-glow),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.65);
+}
+
+.key.prove:active {
+  transform: translateY(2px);
+  box-shadow:
+    0 2px 0 rgba(93, 169, 245, 0.5),
+    0 6px 14px -10px var(--accent-glow),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* =====================================================================
+   END SCREEN — dramatic Fredericka reveal
+   ===================================================================== */
 
 .end {
-  margin-top: 32px;
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+  animation: fade-up 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.end .verdict {
+  margin: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.end .verdict.win  { color: var(--accent); text-shadow: 0 0 18px var(--accent-glow); }
+.end .verdict.lose { color: #E27575; }
+
+.end .reveal {
+  margin: -2px 0 0;
+  font-family: "Fredericka the Great", serif;
+  font-weight: 400;
+  font-size: clamp(58px, 14vw, 86px);
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  text-transform: lowercase;
+  text-shadow:
+    0 2px 0 rgba(0, 0, 0, 0.35),
+    0 0 40px rgba(169, 216, 255, 0.18);
+  animation: reveal-rise 800ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.end .reveal.win  { color: var(--ink); }
+.end .reveal.lose { color: #F1C0C0; }
+
+.end .ribbon {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(244, 245, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.end .ribbon .pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.end-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  width: 100%;
+  align-items: center;
+}
+
+@keyframes reveal-rise {
+  0%   { transform: translateY(20px) scale(0.92); opacity: 0; letter-spacing: 0.18em; }
+  100% { transform: translateY(0)    scale(1);    opacity: 1; letter-spacing: 0.02em; }
+}
+
+@keyframes fade-up {
+  0%   { transform: translateY(12px); opacity: 0; }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1);    opacity: 1; }
+  50%      { transform: scale(1.55); opacity: 0.55; }
+}
+
+/* =====================================================================
+   STAGE-LEVEL CHROME (loading state etc.)
+   ===================================================================== */
+
+.loading {
+  margin: 64px 0 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  color: var(--muted);
+  text-transform: uppercase;
   text-align: center;
 }
-.end h2 { margin: 0 0 12px; font-size: 24px; font-weight: 500; }
-.end .reveal {
-  margin: 16px 0;
-  font-size: 32px;
-  letter-spacing: 0.2em;
-  font-weight: 500;
-  text-transform: uppercase;
+
+.loading::after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  margin-left: 6px;
+  animation: loading-dots 1.2s steps(4) infinite;
 }
-.end .reveal.win { color: var(--zk-teal); }
-.end .reveal.lose { color: #d76262; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --zk-canvas: #0E0E0C;
-    --zk-text: #F1EFE8;
-    --zk-muted: rgba(241, 239, 232, 0.68);
-    --zk-border: rgba(241, 239, 232, 0.24);
-    --zk-panel: rgba(255, 255, 255, 0.04);
+@keyframes loading-dots {
+  0%   { content: ""; }
+  25%  { content: "."; }
+  50%  { content: ".."; }
+  75%  { content: "..."; }
+}
 
-    color-scheme: dark;
+/* honor reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .candidate-track,
+  .bg-aurora,
+  .end .reveal,
+  .end .ribbon .pulse,
+  .splash,
+  .end {
+    animation: none !important;
   }
-
-  .cell.green { background: var(--zk-teal-dk); border-color: var(--zk-teal-dk); }
-  .cell.grey { background: #1A1A17; border-color: #1A1A17; color: var(--zk-bg); }
-  .key.green { background: var(--zk-teal-dk); }
-  .key { background: var(--zk-stone); color: #fff; }
-  .key.grey { background: #1A1A17; color: var(--zk-bg); }
-  .key:hover { background: var(--zk-teal); }
-}
-
-@keyframes candidate-scroll {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
+  .cell.grey, .cell.yellow, .cell.green {
+    animation: none !important;
+  }
 }
