@@ -2,7 +2,14 @@ import { CallData } from "starknet";
 import { account, provider } from "./account";
 import { config } from "./config";
 import { parseReceipt, type ReceiptParsed } from "./receipts";
-import { decodeDictionary, type Dictionary } from "./state";
+import {
+  decodeDictionary,
+  decodeGame,
+  decodeGuess,
+  type Dictionary,
+  type Game,
+  type Guess,
+} from "./state";
 
 const target = config.actionsAddress;
 
@@ -62,6 +69,22 @@ export function surrender(gameId: bigint): Promise<ReceiptParsed> {
 
 export async function getDictionary(): Promise<Dictionary> {
   return decodeDictionary(await view("get_dictionary", []));
+}
+
+export async function getGame(gameId: bigint): Promise<Game> {
+  return decodeGame(await view("get_game", [gameId]));
+}
+
+export async function getGuess(gameId: bigint, index: number): Promise<Guess> {
+  return decodeGuess(await view("get_guess", [gameId, index]));
+}
+
+export async function getCandidateChunk(
+  gameId: bigint,
+  index: number,
+): Promise<bigint> {
+  const [low, high = "0"] = await view("get_chunk", [gameId, index]);
+  return BigInt(low) + (BigInt(high) << 128n);
 }
 
 // --- random felt for game ids -----------------------------------------

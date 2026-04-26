@@ -92,8 +92,17 @@ export function parseReceipt(receipt: any, gameId: bigint): ReceiptParsed {
     if (data.length < valStart + numValues) continue;
     const valFelts = data.slice(valStart, valStart + numValues);
 
-    // Filter by game id (always the first key for both Game and Guess).
-    if (BigInt(keyFelts[0]) !== gameId) continue;
+    const eventGameId = BigInt(keyFelts[0]);
+    if (eventGameId !== gameId) {
+      // Log but don't drop — a tx only ever writes events for one game,
+      // so a "mismatch" here means JS-side gameId got out of sync (e.g.
+      // calldata.compile reduced the felt mod p) and we still want the data.
+      console.warn(`[zordle/parse] gameId differs from expected`, {
+        model: cls.sel === SEL_GAME ? "Game" : "Guess",
+        eventGameId: "0x" + eventGameId.toString(16),
+        expectedGameId: "0x" + gameId.toString(16),
+      });
+    }
 
     if (cls.sel === SEL_GAME && numKeys === 1 && numValues >= 7) {
       // Game value layout (Cairo struct order, after the keyed `id`):

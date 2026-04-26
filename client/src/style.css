@@ -1,12 +1,32 @@
 :root {
-  font-family: system-ui, -apple-system, sans-serif;
-  color-scheme: dark;
-  background: #121213;
-  color: #d7dadc;
+  --zk-teal: #1D9E75;
+  --zk-teal-dk: #0F6E56;
+  --zk-amber: #EF9F27;
+  --zk-stone: #888780;
+  --zk-bg: #F1EFE8;
+  --zk-ink: #2C2C2A;
+  --zk-canvas: var(--zk-bg);
+  --zk-text: var(--zk-ink);
+  --zk-muted: rgba(44, 44, 42, 0.68);
+  --zk-border: rgba(44, 44, 42, 0.24);
+  --zk-panel: rgba(255, 255, 255, 0.34);
+
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  color-scheme: light;
+  background: var(--zk-canvas);
+  color: var(--zk-text);
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; display: flex; justify-content: center; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  background: var(--zk-canvas);
+  color: var(--zk-text);
+  font-weight: 400;
+}
 
 #app {
   display: flex;
@@ -17,32 +37,46 @@ body { margin: 0; min-height: 100vh; display: flex; justify-content: center; }
   max-width: 480px;
 }
 
+.site-header {
+  margin: 0 0 18px;
+  text-align: center;
+}
+
 h1 {
-  margin: 0 0 8px;
-  font-size: 28px;
-  letter-spacing: 0.2em;
-  font-weight: 700;
+  margin: 0;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 30px;
+  letter-spacing: -0.06em;
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
+.brandline {
+  margin: 6px 0 0;
+  color: var(--zk-muted);
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .subtitle {
   margin: 0 0 24px;
-  color: #818384;
+  color: var(--zk-muted);
   font-size: 13px;
 }
 
 button {
-  background: #538d4e;
+  background: var(--zk-teal-dk);
   color: #fff;
   border: none;
   padding: 12px 24px;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   border-radius: 6px;
   cursor: pointer;
   transition: background 120ms;
 }
-button:hover { background: #6aaa64; }
-button:disabled { background: #3a3a3c; cursor: not-allowed; }
+button:hover { background: var(--zk-teal); }
+button:disabled { background: var(--zk-stone); cursor: not-allowed; }
 
 .board {
   display: grid;
@@ -60,26 +94,70 @@ button:disabled { background: #3a3a3c; cursor: not-allowed; }
 .cell {
   width: 60px;
   height: 60px;
-  border: 2px solid #3a3a3c;
+  border: 2px solid var(--zk-border);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
-  background: #121213;
+  background: var(--zk-panel);
+  color: var(--zk-text);
 }
 
-.cell.filled { border-color: #565758; }
-.cell.grey { background: #3a3a3c; border-color: #3a3a3c; }
-.cell.yellow { background: #b59f3b; border-color: #b59f3b; }
-.cell.green { background: #538d4e; border-color: #538d4e; }
+.cell.filled { background: var(--zk-stone); border-color: var(--zk-stone); color: #fff; }
+.cell.grey { background: var(--zk-ink); border-color: var(--zk-ink); color: var(--zk-bg); }
+.cell.yellow { background: var(--zk-amber); border-color: var(--zk-amber); color: var(--zk-ink); }
+.cell.green { background: var(--zk-teal); border-color: var(--zk-teal); color: #fff; }
 
 .status {
   margin-bottom: 12px;
   font-size: 14px;
-  color: #818384;
+  color: var(--zk-muted);
   min-height: 20px;
+}
+
+.candidate-strip {
+  width: 100%;
+  margin: -4px 0 14px;
+  overflow: hidden;
+}
+
+.candidate-label {
+  margin: 0 0 6px;
+  color: var(--zk-muted);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  text-align: center;
+}
+
+.candidate-window {
+  overflow: hidden;
+  border-top: 1px solid var(--zk-border);
+  border-bottom: 1px solid var(--zk-border);
+  padding: 8px 0;
+}
+
+.candidate-track {
+  display: inline-flex;
+  width: max-content;
+  gap: 8px;
+  animation: candidate-scroll 300s linear infinite;
+}
+
+.candidate-track.static {
+  width: 100%;
+  justify-content: center;
+  animation: none;
+}
+
+.candidate-word {
+  flex: 0 0 auto;
+  color: var(--zk-muted);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .keyboard {
@@ -91,35 +169,66 @@ button:disabled { background: #3a3a3c; cursor: not-allowed; }
 }
 .kb-row { display: flex; justify-content: center; gap: 4px; }
 .key {
-  background: #818384;
+  background: var(--zk-stone);
   color: #fff;
   border: none;
   border-radius: 4px;
   padding: 14px 8px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   cursor: pointer;
   flex: 1;
   max-width: 36px;
   text-transform: uppercase;
 }
-.key.wide { max-width: 60px; flex: 1.5; font-size: 11px; }
-.key:hover { background: #9aa0a6; }
-.key.grey { background: #3a3a3c; }
-.key.yellow { background: #b59f3b; }
-.key.green { background: #538d4e; }
+.key.wide { max-width: 66px; flex: 1.6; font-size: 11px; }
+.key.prove {
+  background: var(--zk-teal-dk);
+  color: #ecfdf5;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: 0.14em;
+}
+.key:hover { background: var(--zk-teal); }
+.key.prove:hover { background: var(--zk-teal); }
+.key.grey { background: var(--zk-ink); color: var(--zk-bg); }
+.key.yellow { background: var(--zk-amber); color: var(--zk-ink); }
+.key.green { background: var(--zk-teal); color: #fff; }
 
 .end {
   margin-top: 32px;
   text-align: center;
 }
-.end h2 { margin: 0 0 12px; font-size: 24px; }
+.end h2 { margin: 0 0 12px; font-size: 24px; font-weight: 500; }
 .end .reveal {
   margin: 16px 0;
   font-size: 32px;
   letter-spacing: 0.2em;
-  font-weight: 800;
+  font-weight: 500;
   text-transform: uppercase;
 }
-.end .reveal.win { color: #6aaa64; }
+.end .reveal.win { color: var(--zk-teal); }
 .end .reveal.lose { color: #d76262; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --zk-canvas: #0E0E0C;
+    --zk-text: #F1EFE8;
+    --zk-muted: rgba(241, 239, 232, 0.68);
+    --zk-border: rgba(241, 239, 232, 0.24);
+    --zk-panel: rgba(255, 255, 255, 0.04);
+
+    color-scheme: dark;
+  }
+
+  .cell.green { background: var(--zk-teal-dk); border-color: var(--zk-teal-dk); }
+  .cell.grey { background: #1A1A17; border-color: #1A1A17; color: var(--zk-bg); }
+  .key.green { background: var(--zk-teal-dk); }
+  .key { background: var(--zk-stone); color: #fff; }
+  .key.grey { background: #1A1A17; color: var(--zk-bg); }
+  .key:hover { background: var(--zk-teal); }
+}
+
+@keyframes candidate-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}

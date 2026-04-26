@@ -1,5 +1,8 @@
 import {
   getDictionary,
+  getCandidateChunk,
+  getGame,
+  getGuess,
   randomFelt,
   startGame,
   submitGuess,
@@ -20,7 +23,20 @@ type AppState = {
   message: string;
   won: boolean;
   finalWord: string;
+  txPending: boolean;
+  remainingWords: string[];
 };
+
+type SavedRun = {
+  gameId: string;
+  past: PastGuess[];
+  active: string;
+  message: string;
+  remainingWords?: string[];
+};
+
+const RUN_KEY = "zordle:active-run:v1";
+const CANDIDATE_CHUNKS = 10;
 
 const state: AppState = {
   phase: "loading",
@@ -32,18 +48,190 @@ const state: AppState = {
   message: "",
   won: false,
   finalWord: "",
+  txPending: false,
+  remainingWords: [],
 };
 
 const root = document.getElementById("app")!;
 
+function saveRun() {
+  if (state.phase !== "playing" || state.gameId === null) return;
+  const saved: SavedRun = {
+    gameId: state.gameId.toString(),
+    past: state.past,
+    active: state.active,
+    message: state.message,
+    remainingWords: state.remainingWords,
+  };
+  localStorage.setItem(RUN_KEY, JSON.stringify(saved));
+}
+
+function clearRun() {
+  localStorage.removeItem(RUN_KEY);
+}
+
+function shareText(): string {
+  const score = state.won ? `${state.past.length}/6` : "X/6";
+  const rows = state.past
+    .map((guess) => {
+      let pattern = guess.pattern;
+      let row = "";
+      for (let i = 0; i < 5; i += 1) {
+        const trit = pattern % 3;
+        row += trit === 2 ? "🟩" : trit === 1 ? "🟧" : "⬜";
+        pattern = Math.floor(pattern / 3);
+      }
+      return row;
+    })
+    .join("\n");
+
+  return [`zordle ${score}`, rows, "verified · zkorp.xyz/zordle"].join("\n");
+}
+
+function restoreRun(): boolean {
+  try {
+    const raw = localStorage.getItem(RUN_KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw) as SavedRun;
+    if (!saved.gameId || !Array.isArray(saved.past)) return false;
+
+    state.gameId = BigInt(saved.gameId);
+    state.past = saved.past;
+    state.active = saved.active ?? "";
+    state.message = saved.message || `${state.words.length} words remaining`;
+    state.phase = "playing";
+    state.won = false;
+    state.finalWord = "";
+    state.txPending = false;
+    state.remainingWords = saved.remainingWords ?? [];
+    return true;
+  } catch (err) {
+    console.warn("[zordle/ui] failed to restore active run", err);
+    clearRun();
+    return false;
+  }
+}
+
+function renderHeader(): string {
+  return `
+    <header class="site-header">
+      <h1>zordle</h1>
+      <p class="brandline">by zkorp · onchain word puzzle</p>
+    </header>
+  `;
+}
+
+function renderRemainingCarousel(): string {
+  if (state.phase !== "playing" || state.remainingWords.length === 0) {
+    return "";
+  }
+
+  const words = state.remainingWords
+    .map((word) => `<span class="candidate-word">${word}</span>`)
+    .join("");
+  const trackClass = state.remainingWords.length > 3
+    ? "candidate-track"
+    : "candidate-track static";
+  const trackWords = state.remainingWords.length > 3 ? `${words}${words}` : words;
+  return `
+    <section class="candidate-strip" aria-label="remaining candidate words">
+      <div class="candidate-label">${state.remainingWords.length} remaining</div>
+      <div class="candidate-window">
+        <div class="${trackClass}">${trackWords}</div>
+      </div>
+    </section>
+  `;
+}
+
+async function refreshRemainingWords() {
+  if (state.gameId === null) return;
+
+  const remaining: string[] = [];
+  for (let chunkIndex = 0; chunkIndex < CANDIDATE_CHUNKS; chunkIndex += 1) {
+    let bits = await getCandidateChunk(state.gameId, chunkIndex);
+    let bit = 0;
+    while (bits > 0n) {
+      if ((bits & 1n) === 1n) {
+        const wordId = chunkIndex * 256 + bit;
+        const word = state.words[wordId];
+        if (word) remaining.push(word);
+      }
+      bits >>= 1n;
+      bit += 1;
+    }
+  }
+
+  state.remainingWords = remaining;
+  saveRun();
+}
+
+type SyncResult = "missing" | "playing" | "ended";
+
+async function syncGameFromChain(): Promise<SyncResult> {
+  if (state.gameId === null) return "missing";
+
+  const game = await getGame(state.gameId);
+  if (game.startedAt === 0n) {
+    // Stale localStorage gameId — the world was migrated or the game id
+    // never landed. Drop it so the caller can fall through to splash.
+    clearRun();
+    state.gameId = null;
+    return "missing";
+  }
+
+  const past: PastGuess[] = [];
+  for (let index = 0; index < game.guessesUsed; index += 1) {
+    const guess = await getGuess(state.gameId, index);
+    past.push({
+      word: state.words[guess.wordId] ?? "?????",
+      pattern: guess.pattern,
+    });
+  }
+
+  state.past = past;
+  state.active = "";
+  state.txPending = false;
+
+  if (game.endedAt !== 0n) {
+    state.won = game.won;
+    state.finalWord = state.words[game.finalWordId] ?? "?????";
+    state.message = game.won ? "proof accepted" : "game over";
+    state.phase = "ending";
+    state.remainingWords = [];
+    clearRun();
+    return "ended";
+  }
+
+  state.phase = "playing";
+  return "playing";
+}
+
+async function restoreRunAndRefresh(): Promise<boolean> {
+  if (!restoreRun()) return false;
+  render();
+  try {
+    const result = await syncGameFromChain();
+    if (result === "missing") return false;
+    if (result === "ended") {
+      render();
+      return true;
+    }
+    await refreshRemainingWords();
+    render();
+  } catch (err) {
+    console.warn("[zordle/ui] failed to refresh remaining words", err);
+  }
+  return true;
+}
+
 function render() {
   switch (state.phase) {
     case "loading":
-      root.innerHTML = `<h1>ZORDLE</h1><p>loading…</p>`;
+      root.innerHTML = `${renderHeader()}<p>loading…</p>`;
       return;
     case "splash":
       root.innerHTML = `
-        <h1>ZORDLE</h1>
+        ${renderHeader()}
         <p class="subtitle">Lazy adversarial Wordle on Dojo. ${state.words.length} words.</p>
         <button id="start">Start game</button>
       `;
@@ -53,21 +241,25 @@ function render() {
       return;
     case "playing":
       root.innerHTML = `
-        <h1>ZORDLE</h1>
+        ${renderHeader()}
         ${renderBoard(state.past, state.active, state.message)}
+        ${renderRemainingCarousel()}
         ${renderKeyboard(state.past)}
       `;
       bindKeyboard();
       return;
     case "ending":
       root.innerHTML = `
-        <h1>ZORDLE</h1>
+        ${renderHeader()}
         ${renderBoard(state.past, "", state.message)}
         ${renderEnd(state.won, state.finalWord)}
       `;
       document
         .getElementById("play-again")!
         .addEventListener("click", onStart);
+      document
+        .getElementById("share-result")!
+        .addEventListener("click", onShare);
       return;
   }
 }
@@ -91,6 +283,8 @@ document.addEventListener("keydown", (e) => {
 });
 
 function handleKey(key: string) {
+  if (state.txPending) return;
+
   if (key === "ENTER") {
     void onSubmit();
     return;
@@ -98,17 +292,23 @@ function handleKey(key: string) {
   if (key === "BACK") {
     if (state.active.length > 0) {
       state.active = state.active.slice(0, -1);
+      saveRun();
       render();
     }
     return;
   }
   if (key.startsWith("letter:") && state.active.length < 5) {
     state.active += key.slice("letter:".length);
+    saveRun();
     render();
   }
 }
 
 async function onStart() {
+  if (await restoreRunAndRefresh()) {
+    return;
+  }
+
   state.gameId = randomFelt();
   state.past = [];
   state.active = "";
@@ -116,15 +316,32 @@ async function onStart() {
   state.phase = "playing";
   state.won = false;
   state.finalWord = "";
+  state.txPending = true;
+  state.remainingWords = [];
+  saveRun();
   render();
   try {
     await startGame(state.gameId);
     state.message = `${state.words.length} words remaining`;
-    render();
+    await refreshRemainingWords();
   } catch (err) {
     state.message = `Error: ${(err as Error).message}`;
+  } finally {
+    state.txPending = false;
+    saveRun();
     render();
   }
+}
+
+async function onShare() {
+  try {
+    await navigator.clipboard.writeText(shareText());
+    state.message = "Copied result";
+  } catch (err) {
+    console.error("[zordle/ui] share failed", err);
+    state.message = "Share failed";
+  }
+  render();
 }
 
 async function onSubmit() {
@@ -141,8 +358,9 @@ async function onSubmit() {
     return;
   }
   const submitted = state.active;
-  state.active = "";
   state.message = "Submitting…";
+  state.txPending = true;
+  saveRun();
   render();
   try {
     console.log(`[zordle/ui] submitGuess`, { wordId, word: submitted });
@@ -151,20 +369,41 @@ async function onSubmit() {
     const { game, guess } = parsed;
     if (!guess || !game) {
       state.message = `Receipt parse failed (game=${!!game}, guess=${!!guess}); see console`;
+      state.txPending = false;
+      saveRun();
       render();
       return;
     }
+    state.active = "";
     state.past.push({ word: submitted, pattern: guess.pattern });
     state.message = `${guess.candidatesRemaining} words remaining`;
+    state.txPending = false;
     if (game.endedAt !== 0n) {
       state.won = game.won;
       state.finalWord = state.words[game.finalWordId] ?? "?????";
+      state.message = game.won ? "proof accepted" : "game over";
       state.phase = "ending";
+      clearRun();
+    } else {
+      await refreshRemainingWords();
+      saveRun();
     }
     render();
   } catch (err) {
     console.error(`[zordle/ui] onSubmit error`, err);
+    try {
+      const result = await syncGameFromChain();
+      if (result === "ended" || result === "playing") {
+        render();
+        return;
+      }
+    } catch (syncErr) {
+      console.warn("[zordle/ui] failed to recover game state", syncErr);
+    }
     state.message = `Error: ${(err as Error).message}`;
+    state.active = submitted;
+    state.txPending = false;
+    saveRun();
     render();
   }
 }
@@ -188,7 +427,7 @@ async function bootstrap() {
   try {
     const dict = await getDictionary();
     if (!dict.loaded) {
-      root.innerHTML = `<h1>ZORDLE</h1><p>Dictionary not loaded on-chain. Run scripts/load_dictionary.mjs.</p>`;
+      root.innerHTML = `${renderHeader()}<p>Dictionary not loaded on-chain. Run scripts/load_dictionary.mjs.</p>`;
       return;
     }
     if (dict.wordCount !== state.words.length) {
@@ -196,10 +435,12 @@ async function bootstrap() {
         `On-chain word count (${dict.wordCount}) != local words.txt (${state.words.length}).`,
       );
     }
-    state.phase = "splash";
-    render();
+    if (!(await restoreRunAndRefresh())) {
+      state.phase = "splash";
+      render();
+    }
   } catch (err) {
-    root.innerHTML = `<h1>ZORDLE</h1><p>Failed to reach contract: ${(err as Error).message}</p>`;
+    root.innerHTML = `${renderHeader()}<p>Failed to reach contract: ${(err as Error).message}</p>`;
   }
 }
 
