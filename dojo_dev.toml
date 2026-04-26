@@ -1,0 +1,10 @@
+[world]
+name = "Zordle"
+description = "Lazy adversarial Wordle on Dojo"
+seed = "zordle_dev_0_1"
+
+[namespace]
+default = "zordle_0_1"
+
+[writers]
+"zordle_0_1" = ["zordle_0_1-actions", "zordle_0_1-setup"]

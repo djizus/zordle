@@ -1,0 +1,11 @@
+{
+  "name": "zordle-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "load": "node load_dictionary.mjs"
+  },
+  "dependencies": {
+    "starknet": "^9.4.2"
+  }
+}

@@ -1,0 +1,17 @@
+[workspace]
+members = ["contracts"]
+
+[workspace.package]
+edition = "2024_07"
+cairo-version = "2.15.0"
+
+[workspace.dependencies]
+starknet = "2.15.0"
+dojo = "1.8.0"
+dojo_cairo_test = "1.8.0"
+cairo_test = "2.15.0"
+
+[workspace.cairo]
+sierra-replace-ids = true
+
+[profile.dev]

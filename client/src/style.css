@@ -1,0 +1,125 @@
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+  background: #121213;
+  color: #d7dadc;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: flex; justify-content: center; }
+
+#app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 12px;
+  width: 100%;
+  max-width: 480px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  letter-spacing: 0.2em;
+  font-weight: 700;
+}
+
+.subtitle {
+  margin: 0 0 24px;
+  color: #818384;
+  font-size: 13px;
+}
+
+button {
+  background: #538d4e;
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+button:hover { background: #6aaa64; }
+button:disabled { background: #3a3a3c; cursor: not-allowed; }
+
+.board {
+  display: grid;
+  grid-template-rows: repeat(6, 1fr);
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.cell {
+  width: 60px;
+  height: 60px;
+  border: 2px solid #3a3a3c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: #121213;
+}
+
+.cell.filled { border-color: #565758; }
+.cell.grey { background: #3a3a3c; border-color: #3a3a3c; }
+.cell.yellow { background: #b59f3b; border-color: #b59f3b; }
+.cell.green { background: #538d4e; border-color: #538d4e; }
+
+.status {
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #818384;
+  min-height: 20px;
+}
+
+.keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+}
+.kb-row { display: flex; justify-content: center; gap: 4px; }
+.key {
+  background: #818384;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 14px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  flex: 1;
+  max-width: 36px;
+  text-transform: uppercase;
+}
+.key.wide { max-width: 60px; flex: 1.5; font-size: 11px; }
+.key:hover { background: #9aa0a6; }
+.key.grey { background: #3a3a3c; }
+.key.yellow { background: #b59f3b; }
+.key.green { background: #538d4e; }
+
+.end {
+  margin-top: 32px;
+  text-align: center;
+}
+.end h2 { margin: 0 0 12px; font-size: 24px; }
+.end .reveal {
+  margin: 16px 0;
+  font-size: 32px;
+  letter-spacing: 0.2em;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.end .reveal.win { color: #6aaa64; }
+.end .reveal.lose { color: #d76262; }

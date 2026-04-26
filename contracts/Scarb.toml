@@ -1,0 +1,21 @@
+[package]
+name = "zordle"
+version = "0.1.0"
+edition.workspace = true
+cairo-version.workspace = true
+
+[[target.starknet-contract]]
+sierra = true
+casm = true
+build-external-contracts = ["dojo::world::world_contract::world"]
+
+[dependencies]
+starknet.workspace = true
+dojo.workspace = true
+
+[dev-dependencies]
+cairo_test.workspace = true
+dojo_cairo_test.workspace = true
+
+[tool.scarb]
+allow-prebuilt-plugins = ["dojo_cairo_macros"]
