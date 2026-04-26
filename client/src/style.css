@@ -113,27 +113,16 @@ body {
 .site-header {
   width: 100%;
   margin: 0 0 22px;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 14px;
+  text-align: center;
   position: relative;
 }
 
 .site-header::after {
   content: "";
-  grid-column: 1 / -1;
+  display: block;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--hairline), transparent);
   margin-top: 14px;
-}
-
-.cube-mark {
-  width: 38px;
-  height: 38px;
-  background: url("/zkorp-cube.png") center / contain no-repeat;
-  filter: drop-shadow(0 0 14px var(--accent-glow));
-  opacity: 0.92;
 }
 
 .wordmark {
@@ -155,22 +144,6 @@ body {
 .wordmark .accent {
   color: var(--accent);
   text-shadow: 0 0 18px var(--accent-glow);
-}
-
-.brandline {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.32em;
-  color: var(--muted);
-  text-transform: uppercase;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.brandline .dot {
-  color: var(--accent);
-  margin: 0 6px;
 }
 
 /* =====================================================================
@@ -198,6 +171,11 @@ body {
 
 .splash-meta strong {
   color: var(--ink);
+  font-weight: 600;
+}
+
+.splash-meta .accent {
+  color: var(--accent);
   font-weight: 600;
 }
 

@@ -139,17 +139,27 @@ function startDemoCycle() {
     for (let i = 0; i < 5; i++) spans[i].textContent = word[i] ?? "";
   };
   writeWord(DEMO_WORDS[demoIndex]);
-  // animationiteration on cell 0's letter span fires at the precise
-  // wrap point of its CSS animation (~t = 4.8s, 9.6s, …). Cell 0 has
-  // no animation-delay, so its wrap moment is also when the staggered
-  // tail of cells 1–4 are deep into the empty period of cycle N.
-  const span0 = spans[0];
-  const handler = () => {
-    demoIndex = (demoIndex + 1) % DEMO_WORDS.length;
-    writeWord(DEMO_WORDS[demoIndex]);
+  // Each cell swaps its OWN letter on its OWN cycle wrap. Cells are
+  // animation-delayed (110ms × index), so cell 0 wraps first and bumps
+  // demoIndex; cells 1–4 each wrap a stagger-step later and read that
+  // new index, fetching the matching letter for their position. This
+  // means at every individual cell's wrap, that cell is fully empty
+  // and the new letter takes effect cleanly — no residual green from
+  // the previous word leaking into the new typing pass.
+  type Bound = { el: HTMLElement; fn: () => void };
+  const bound: Bound[] = [];
+  for (let i = 0; i < 5; i++) {
+    const span = spans[i];
+    const fn = () => {
+      if (i === 0) demoIndex = (demoIndex + 1) % DEMO_WORDS.length;
+      span.textContent = DEMO_WORDS[demoIndex][i] ?? "";
+    };
+    span.addEventListener("animationiteration", fn);
+    bound.push({ el: span, fn });
+  }
+  demoCleanup = () => {
+    for (const { el, fn } of bound) el.removeEventListener("animationiteration", fn);
   };
-  span0.addEventListener("animationiteration", handler);
-  demoCleanup = () => span0.removeEventListener("animationiteration", handler);
 }
 
 function stopDemoCycle() {
@@ -162,9 +172,7 @@ function stopDemoCycle() {
 function renderHeader(): string {
   return `
     <header class="site-header">
-      <div class="cube-mark" aria-hidden="true"></div>
       <h1 class="wordmark">z<span class="accent">o</span>rdle</h1>
-      <p class="brandline">zkorp<span class="dot">·</span>onchain</p>
     </header>
   `;
 }
@@ -313,7 +321,7 @@ function render() {
             </div>
           </div>
           <button id="start" class="btn-primary">Start game</button>
-          <p class="splash-meta"><strong>${state.words.length.toLocaleString()}</strong> words · 2,315 answers · Dojo + Starknet</p>
+          <p class="splash-meta"><strong>2,315</strong> words · <span class="accent">1</span> answer · zkorp</p>
         </section>
       `;
       document
