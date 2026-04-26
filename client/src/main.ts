@@ -42,6 +42,14 @@ const CANDIDATE_CHUNKS = 10;
 // Set when a guess is just confirmed, consumed by the next render call.
 let flipOnce = -1;
 
+// Five-letter words cycled by the splash demo, themed around the project's
+// stack (zkorp / Starknet / Cairo / Wordle classics).
+const DEMO_WORDS = [
+  "crane", "stark", "cairo", "prove",
+  "block", "nonce", "chain", "trace",
+];
+let demoIndex = 0;
+
 const state: AppState = {
   phase: "loading",
   words: [],
@@ -116,6 +124,41 @@ function restoreRun(): boolean {
   }
 }
 
+// Listener cleanup for the splash demo. The interval-based approach drifted
+// from the CSS animation; we now hook into cell 0's animationiteration
+// event so the letter swap fires at the exact frame the cycle wraps —
+// which (with the keyframes' all-empty tail) is the only moment every
+// cell is reset to transparent. No more residual green on the next word.
+let demoCleanup: (() => void) | null = null;
+
+function startDemoCycle() {
+  if (demoCleanup) return;
+  const spans = document.querySelectorAll<HTMLElement>(".demo-cell span");
+  if (spans.length !== 5) return;
+  const writeWord = (word: string) => {
+    for (let i = 0; i < 5; i++) spans[i].textContent = word[i] ?? "";
+  };
+  writeWord(DEMO_WORDS[demoIndex]);
+  // animationiteration on cell 0's letter span fires at the precise
+  // wrap point of its CSS animation (~t = 4.8s, 9.6s, …). Cell 0 has
+  // no animation-delay, so its wrap moment is also when the staggered
+  // tail of cells 1–4 are deep into the empty period of cycle N.
+  const span0 = spans[0];
+  const handler = () => {
+    demoIndex = (demoIndex + 1) % DEMO_WORDS.length;
+    writeWord(DEMO_WORDS[demoIndex]);
+  };
+  span0.addEventListener("animationiteration", handler);
+  demoCleanup = () => span0.removeEventListener("animationiteration", handler);
+}
+
+function stopDemoCycle() {
+  if (demoCleanup) {
+    demoCleanup();
+    demoCleanup = null;
+  }
+}
+
 function renderHeader(): string {
   return `
     <header class="site-header">
@@ -127,22 +170,42 @@ function renderHeader(): string {
 }
 
 function renderRemainingCarousel(): string {
-  if (state.phase !== "playing" || state.remainingWords.length === 0) {
-    return "";
+  if (state.phase !== "playing") return "";
+
+  // Surviving candidates (the contract bitmap), with a count label above
+  // the scrolling track. Track duration scales with count so the visible
+  // px/sec stays constant turn over turn (~400 px/s ≈ 5 words/sec).
+  const remaining = state.remainingWords;
+  const count = remaining.length;
+  if (count === 0) {
+    return `
+      <section class="candidate-strip" aria-hidden="true">
+        <div class="candidate-label"><span class="count">···</span> remaining</div>
+        <div class="candidate-window">
+          <div class="candidate-track static"></div>
+        </div>
+      </section>
+    `;
   }
 
-  const words = state.remainingWords
+  const words = remaining
     .map((word) => `<span class="candidate-word">${word}</span>`)
     .join("");
-  const trackClass = state.remainingWords.length > 3
-    ? "candidate-track"
-    : "candidate-track static";
-  const trackWords = state.remainingWords.length > 3 ? `${words}${words}` : words;
+  // Single copy of words, no duplication. Animation slides the track from
+  // off-screen-right to off-screen-left (using container query units so
+  // CSS knows the viewport width). At ~80 px/sec, with avg word ≈ 80 px
+  // wide, this scrolls about one word per second regardless of count;
+  // the loop reset happens off-screen so it's seamless.
+  const trackClass = count > 3 ? "candidate-track" : "candidate-track static";
+  const PX_PER_SEC = 80;
+  const AVG_WORD_PX = 80;
+  const VIEWPORT_PX = 320;
+  const duration = Math.round(((count * AVG_WORD_PX + VIEWPORT_PX) / PX_PER_SEC) * 1000);
   return `
-    <section class="candidate-strip" aria-label="remaining candidate words">
-      <div class="candidate-label"><span class="count">${state.remainingWords.length}</span> remaining</div>
+    <section class="candidate-strip" aria-label="surviving candidate words">
+      <div class="candidate-label"><span class="count">${count.toLocaleString()}</span> remaining</div>
       <div class="candidate-window">
-        <div class="${trackClass}">${trackWords}</div>
+        <div class="${trackClass}" style="--track-duration:${duration}ms">${words}</div>
       </div>
     </section>
   `;
@@ -200,7 +263,7 @@ async function syncGameFromChain(): Promise<SyncResult> {
   if (game.endedAt !== 0n) {
     state.won = game.won;
     state.finalWord = state.words[game.finalWordId] ?? "?????";
-    state.message = game.won ? "proof accepted" : "game over";
+    state.message = game.won ? "you won" : "game over";
     state.phase = "ending";
     state.remainingWords = [];
     clearRun();
@@ -224,21 +287,31 @@ async function restoreRunAndRefresh(): Promise<boolean> {
     await refreshRemainingWords();
     render();
   } catch (err) {
-    console.warn("[zordle/ui] failed to refresh remaining words", err);
+    console.warn("[zordle/ui] failed to sync game state", err);
   }
   return true;
 }
 
 function render() {
+  // The splash demo uses a setInterval; tear it down on phase change.
+  if (state.phase !== "splash") stopDemoCycle();
   switch (state.phase) {
     case "loading":
-      root.innerHTML = `${renderHeader()}<p class="loading">syncing chain</p>`;
+      root.innerHTML = `${renderHeader()}<p class="boot-loading">syncing chain</p>`;
       return;
     case "splash":
       root.innerHTML = `
         ${renderHeader()}
         <section class="splash">
-          <p class="splash-tagline">A <em>lazy</em> adversary picks the worst feedback you can prove. Six guesses. Onchain.</p>
+          <div class="demo" aria-hidden="true">
+            <div class="demo-row">
+              <div class="demo-cell" style="--i:0"><span></span></div>
+              <div class="demo-cell" style="--i:1"><span></span></div>
+              <div class="demo-cell" style="--i:2"><span></span></div>
+              <div class="demo-cell" style="--i:3"><span></span></div>
+              <div class="demo-cell" style="--i:4"><span></span></div>
+            </div>
+          </div>
           <button id="start" class="btn-primary">Start game</button>
           <p class="splash-meta"><strong>${state.words.length.toLocaleString()}</strong> words · 2,315 answers · Dojo + Starknet</p>
         </section>
@@ -246,11 +319,12 @@ function render() {
       document
         .getElementById("start")!
         .addEventListener("click", onStart);
+      startDemoCycle();
       return;
     case "playing":
       root.innerHTML = `
         ${renderHeader()}
-        ${renderBoard(state.past, state.active, state.message, flipOnce)}
+        ${renderBoard(state.past, state.active, state.message, flipOnce, state.txPending)}
         ${renderRemainingCarousel()}
         ${renderKeyboard(state.past)}
       `;
@@ -261,7 +335,7 @@ function render() {
       const score = state.won ? `${state.past.length}/6` : "X/6";
       root.innerHTML = `
         ${renderHeader()}
-        ${renderBoard(state.past, "", `score · <span class="accent">${score}</span>`, flipOnce)}
+        ${renderBoard(state.past, "", `score · <span class="accent">${score}</span>`, flipOnce, false)}
         ${renderEnd(state.won, state.finalWord)}
       `;
       flipOnce = -1;
@@ -294,6 +368,23 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// Touch only the 5 cells of the active row. Avoids re-rendering the whole
+// app (header + 6 rows + 1.2K-span carousel + 33-key keyboard) on every
+// keystroke, which is what was causing the typing lag.
+function updateActiveRow() {
+  const rows = document.querySelectorAll<HTMLElement>(".board > .row");
+  const row = rows[state.past.length];
+  if (!row) return;
+  const cells = row.children;
+  for (let i = 0; i < 5; i++) {
+    const cell = cells[i] as HTMLElement | undefined;
+    if (!cell) continue;
+    const letter = (state.active[i] ?? "").toUpperCase();
+    if (cell.textContent !== letter) cell.textContent = letter;
+    cell.classList.toggle("filled", letter.length > 0);
+  }
+}
+
 function handleKey(key: string) {
   if (state.txPending) return;
 
@@ -305,14 +396,14 @@ function handleKey(key: string) {
     if (state.active.length > 0) {
       state.active = state.active.slice(0, -1);
       saveRun();
-      render();
+      updateActiveRow();
     }
     return;
   }
   if (key.startsWith("letter:") && state.active.length < 5) {
     state.active += key.slice("letter:".length);
     saveRun();
-    render();
+    updateActiveRow();
   }
 }
 
@@ -324,7 +415,7 @@ async function onStart() {
   state.gameId = randomFelt();
   state.past = [];
   state.active = "";
-  state.message = "Starting…";
+  state.message = `guess <span class="accent">1</span> of 6 · starting<span class="dots"></span>`;
   state.phase = "playing";
   state.won = false;
   state.finalWord = "";
@@ -370,7 +461,11 @@ async function onSubmit() {
     return;
   }
   const submitted = state.active;
-  state.message = "Submitting…";
+  // The "next" guess number = current past.length + 1. Persists through
+  // the tx so the user keeps seeing what they're submitting + a live
+  // animated dots indicator while the receipt is in flight.
+  const nextGuess = state.past.length + 1;
+  state.message = `guess <span class="accent">${nextGuess}</span> of 6 · processing<span class="dots"></span>`;
   state.txPending = true;
   saveRun();
   render();
@@ -389,12 +484,12 @@ async function onSubmit() {
     state.active = "";
     state.past.push({ word: submitted, pattern: guess.pattern });
     flipOnce = state.past.length - 1;
-    state.message = `guess <span class="accent">${state.past.length}</span> of 6 · proof accepted`;
+    state.message = `guess <span class="accent">${state.past.length}</span> of 6`;
     state.txPending = false;
     if (game.endedAt !== 0n) {
       state.won = game.won;
       state.finalWord = state.words[game.finalWordId] ?? "?????";
-      state.message = game.won ? "proof accepted" : "game over";
+      state.message = game.won ? "you won" : "game over";
       state.phase = "ending";
       clearRun();
     } else {

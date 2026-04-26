@@ -8,7 +8,7 @@ export function renderKeyboard(past: PastGuess[]): string {
   for (let r = 0; r < ROWS.length; r++) {
     const keys: string[] = [];
     if (r === 2) {
-      keys.push(`<button class="key wide prove" data-key="ENTER">PROVE</button>`);
+      keys.push(`<button class="key wide enter" data-key="ENTER">Enter</button>`);
     }
     for (const ch of ROWS[r]) {
       const cls = status.get(ch) ?? "";
@@ -17,7 +17,7 @@ export function renderKeyboard(past: PastGuess[]): string {
       );
     }
     if (r === 2) {
-      keys.push(`<button class="key wide" data-key="BACK">Del</button>`);
+      keys.push(`<button class="key wide del" data-key="BACK" aria-label="Delete">⌫</button>`);
     }
     rows.push(`<div class="kb-row">${keys.join("")}</div>`);
   }

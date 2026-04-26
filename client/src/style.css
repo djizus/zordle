@@ -181,26 +181,10 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 28px;
-  padding: 32px 8px;
+  gap: 36px;
+  padding: 28px 8px 16px;
   text-align: center;
   animation: fade-up 600ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-.splash-tagline {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.55;
-  color: var(--ink-2);
-  max-width: 28ch;
-}
-
-.splash-tagline em {
-  font-family: "Fredericka the Great", serif;
-  font-style: normal;
-  color: var(--accent);
-  font-size: 1.18em;
-  margin: 0 0.05em;
 }
 
 .splash-meta {
@@ -215,6 +199,116 @@ body {
 .splash-meta strong {
   color: var(--ink);
   font-weight: 600;
+}
+
+/* =====================================================================
+   SPLASH DEMO — single-row Wordle loop, types in CRANE then flips green.
+   Each cell + letter shares a per-index delay (--i × 110ms) so the
+   typing and the flip both stagger left → right.
+   ===================================================================== */
+
+.demo {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  perspective: 800px;
+  margin-top: 8px;
+}
+
+.demo-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  width: min(296px, 72vw);
+}
+
+.demo-cell {
+  aspect-ratio: 1 / 1;
+  background: transparent;
+  border: 2px solid var(--tile-empty-border);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Outfit", sans-serif;
+  font-size: clamp(26px, 6.4vw, 32px);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink);
+  transform-style: preserve-3d;
+  animation: demo-cell 4.8s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+  animation-delay: calc(var(--i) * 110ms);
+}
+
+.demo-cell span {
+  display: inline-block;
+  opacity: 0;
+  animation: demo-letter 4.8s ease infinite;
+  animation-delay: calc(var(--i) * 110ms);
+}
+
+@keyframes demo-letter {
+  0%, 100% { opacity: 0; transform: scale(0.6); }
+  3%       { opacity: 1; transform: scale(1.12); }
+  7%       { opacity: 1; transform: scale(1); }
+  /* hold visible through flip + green-hold */
+  62%      { opacity: 1; transform: scale(1); }
+  /* fade out as the green tile fades */
+  72%      { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes demo-cell {
+  /* Cycle layout: type → hold typed → flip → green → fade → LONG empty
+     window so the per-cell stagger (0–440ms) overlaps in "all empty"
+     for ~1 sec, giving the JS letter-swap a clean moment to land. */
+  0%, 100% {
+    background: transparent;
+    border-color: var(--tile-empty-border);
+    transform: rotateX(0);
+  }
+  3% {
+    border-color: var(--tile-filled-border);
+  }
+  22% {
+    transform: rotateX(0);
+    border-color: var(--tile-filled-border);
+    background: transparent;
+  }
+  /* flip out */
+  31% {
+    transform: rotateX(-90deg);
+    border-color: var(--tile-filled-border);
+    background: transparent;
+  }
+  /* swap to green at the spine of the flip */
+  32% {
+    transform: rotateX(-90deg);
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  /* flip back showing green */
+  40% {
+    transform: rotateX(0);
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  /* hold the win */
+  60% {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  /* visible fade between words — green melts back to the empty tile */
+  72% {
+    background: transparent;
+    border-color: var(--tile-empty-border);
+  }
+  /* 72%–100% is the all-empty window; with 110ms × 4 stagger this still
+     overlaps for ~1s across all 5 cells, so the next cycle never starts
+     while the previous green is still painted. */
 }
 
 /* =====================================================================
@@ -312,35 +406,95 @@ button#share-result:hover {
    ===================================================================== */
 
 .status {
-  margin: 0 0 16px;
-  min-height: 22px;
-  font-size: 13px;
+  margin: 0 0 14px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--muted);
   text-transform: uppercase;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .status .ink { color: var(--ink); }
 .status .accent { color: var(--accent); font-variant-numeric: tabular-nums; }
 
+/* Trailing animated dots used during tx-pending status. Fixed width so
+   the line never shifts as the dot count cycles 0 → 3. */
+.status .dots {
+  display: inline-block;
+  text-align: left;
+  width: 1.4em;
+  vertical-align: bottom;
+}
+.status .dots::after {
+  content: "";
+  animation: status-dots 1.4s steps(4, end) infinite;
+}
+@keyframes status-dots {
+  0%   { content: ""; }
+  25%  { content: "."; }
+  50%  { content: ".."; }
+  75%, 100% { content: "..."; }
+}
+
 /* =====================================================================
    BOARD — Wordle-grade tile grid
    ===================================================================== */
 
+.board-wrap {
+  position: relative;
+  /* Tighter than 348px so the whole game fits comfortably without
+     scrolling. Cells are still readable on phone-sized viewports. */
+  width: min(304px, 84vw);
+  /* Extra breathing room so the perimeter loader (inset -10px) doesn't
+     touch the status text above or the candidate strip below. */
+  margin: 4px auto 18px;
+}
+
 .board {
   display: grid;
   grid-template-rows: repeat(6, 1fr);
-  gap: 6px;
-  margin: 0 auto 18px;
-  width: min(348px, 90vw);
+  gap: 5px;
+  width: 100%;
+}
+
+/* Tx-pending loader: a single dash chases around the board perimeter.
+   Mirrors zkube's grid-loading effect, ported to the Wordle layout. */
+.board-loader {
+  position: absolute;
+  inset: -10px;
+  width: calc(100% + 20px);
+  height: calc(100% + 20px);
+  pointer-events: none;
+  overflow: visible;
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.board-wrap.loading .board-loader {
+  opacity: 1;
+}
+
+.board-loader rect {
+  filter: drop-shadow(0 0 10px var(--accent-glow));
+}
+
+.board-wrap.loading .board-loader rect {
+  animation: zordle-dash 2.4s linear infinite;
+}
+
+@keyframes zordle-dash {
+  to { stroke-dashoffset: -100; }
 }
 
 .row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
+  gap: 5px;
 }
 
 .cell {
@@ -349,7 +503,7 @@ button#share-result:hover {
   align-items: center;
   justify-content: center;
   font-family: "Outfit", sans-serif;
-  font-size: clamp(26px, 6.5vw, 32px);
+  font-size: clamp(22px, 5.4vw, 28px);
   font-weight: 800;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -358,8 +512,8 @@ button#share-result:hover {
   border: 2px solid var(--tile-empty-border);
   border-radius: 4px;
   user-select: none;
-  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              border-color 120ms ease;
+  /* No transitions on .cell — they conflict with the in-place letter
+     swap done by updateActiveRow() (would animate every keypress). */
 }
 
 .cell.filled {
@@ -440,6 +594,9 @@ button#share-result:hover {
   padding: 9px 0;
   border-top: 1px solid var(--hairline);
   border-bottom: 1px solid var(--hairline);
+  /* container-type so the inner track can use 100cqw to know the
+     viewport width and slide cleanly off-screen. */
+  container-type: inline-size;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12%, #000 88%, transparent 100%);
           mask-image: linear-gradient(90deg, transparent 0, #000 12%, #000 88%, transparent 100%);
 }
@@ -448,7 +605,14 @@ button#share-result:hover {
   display: inline-flex;
   width: max-content;
   gap: 22px;
-  animation: candidate-scroll 240s linear infinite;
+  /* Single copy of words, no DOM duplication. Animation runs the track
+     from off-screen-right (translateX(100cqw) = +viewport_width) to
+     off-screen-left (-100% of own width). At cycle end, transform snaps
+     back instantly — but because the snap goes from one off-screen
+     position to another, the user never sees the reset (last word has
+     just exited at the left, and the next cycle re-enters from the
+     right). Constant px/sec is set via --track-duration. */
+  animation: candidate-scroll var(--track-duration, 240s) linear infinite;
 }
 
 .candidate-track.static {
@@ -468,8 +632,13 @@ button#share-result:hover {
 }
 
 @keyframes candidate-scroll {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
+  /* Start: track's left edge sits at the viewport's right edge — the
+     first word is about to enter from the right. */
+  from { transform: translateX(100cqw); }
+  /* End: track's right edge sits at the viewport's left edge — the
+     last word has just exited. Reset is invisible (track is off-screen
+     either way) so the loop appears seamless. */
+  to   { transform: translateX(-100%); }
 }
 
 /* =====================================================================
@@ -521,33 +690,49 @@ button#share-result:hover {
 .key.yellow { background: var(--yellow);      color: #fff;                     border: none; }
 .key.green  { background: var(--green);       color: #fff;                     border: none; }
 
-.key.prove {
+/* Enter — the action key. Sky-blue gradient with arcade depth. */
+.key.enter {
   background:
     linear-gradient(180deg, var(--accent) 0%, var(--accent) 78%, var(--accent-deep) 100%);
   color: #051226;
   border: 1px solid rgba(169, 216, 255, 0.5);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.14em;
   box-shadow:
     0 4px 0 rgba(93, 169, 245, 0.45),
     0 10px 22px -10px var(--accent-glow),
     inset 0 1.5px 0 rgba(255, 255, 255, 0.6);
 }
 
-.key.prove:hover {
+.key.enter:hover {
   box-shadow:
     0 3px 0 rgba(93, 169, 245, 0.5),
     0 12px 28px -10px var(--accent-glow),
     inset 0 1.5px 0 rgba(255, 255, 255, 0.65);
 }
 
-.key.prove:active {
+.key.enter:active {
   transform: translateY(2px);
   box-shadow:
     0 2px 0 rgba(93, 169, 245, 0.5),
     0 6px 14px -10px var(--accent-glow),
     inset 0 1.5px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* Delete — visually distinct from letter keys (darker neutral) so the
+   destructive action reads at a glance. Wider, with the backspace glyph. */
+.key.del {
+  background: rgba(244, 245, 255, 0.04);
+  color: var(--muted);
+  border: 1px solid rgba(244, 245, 255, 0.12);
+  font-size: 18px;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+.key.del:hover {
+  background: rgba(244, 245, 255, 0.10);
+  color: var(--ink);
+  border-color: rgba(244, 245, 255, 0.22);
 }
 
 /* =====================================================================
@@ -595,37 +780,21 @@ button#share-result:hover {
 .end .reveal.win  { color: var(--ink); }
 .end .reveal.lose { color: #F1C0C0; }
 
-.end .ribbon {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: rgba(244, 245, 255, 0.04);
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.end .ribbon .pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 10px var(--accent-glow);
-  animation: pulse 1.6s ease-in-out infinite;
-}
-
 .end-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: center;
   gap: 10px;
-  margin-top: 6px;
+  margin-top: 8px;
   width: 100%;
-  align-items: center;
+}
+
+.end-actions > button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 @keyframes reveal-rise {
@@ -638,16 +807,14 @@ button#share-result:hover {
   100% { transform: translateY(0);    opacity: 1; }
 }
 
-@keyframes pulse {
-  0%, 100% { transform: scale(1);    opacity: 1; }
-  50%      { transform: scale(1.55); opacity: 0.55; }
-}
-
 /* =====================================================================
-   STAGE-LEVEL CHROME (loading state etc.)
+   STAGE-LEVEL CHROME (boot loading state etc.)
    ===================================================================== */
 
-.loading {
+/* Use an element-qualified selector so this rule can NEVER match the
+   `.board-wrap.loading` tx-pending state — they were colliding and adding
+   64px margin-top to the grid every time a guess was submitted. */
+p.boot-loading {
   margin: 64px 0 0;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 11px;
@@ -657,32 +824,29 @@ button#share-result:hover {
   text-align: center;
 }
 
-.loading::after {
-  content: "";
-  display: inline-block;
-  width: 4px;
-  margin-left: 6px;
-  animation: loading-dots 1.2s steps(4) infinite;
-}
-
-@keyframes loading-dots {
-  0%   { content: ""; }
-  25%  { content: "."; }
-  50%  { content: ".."; }
-  75%  { content: "..."; }
-}
-
 /* honor reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .candidate-track,
   .bg-aurora,
   .end .reveal,
-  .end .ribbon .pulse,
+  .board-wrap.loading .board-loader rect,
   .splash,
   .end {
     animation: none !important;
   }
   .cell.grey, .cell.yellow, .cell.green {
     animation: none !important;
+  }
+  /* Freeze the demo on its winning frame so the splash still
+     communicates the all-green payoff. */
+  .demo-cell {
+    animation: none !important;
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  .demo-cell span {
+    animation: none !important;
+    opacity: 1;
   }
 }

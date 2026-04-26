@@ -13,6 +13,7 @@ export function renderBoard(
   active: string,
   message: string,
   flipRowIndex: number = -1,
+  pending: boolean = false,
 ): string {
   const rows: string[] = [];
   for (let r = 0; r < MAX_GUESSES; r++) {
@@ -24,9 +25,26 @@ export function renderBoard(
       rows.push(emptyRow());
     }
   }
+  // pathLength=100 normalises the rect's perimeter to 100 user units so
+  // we can express the dasharray as percentages directly. The chasing
+  // segment is 18% of the perimeter; animation is 2.4s linear infinite.
+  const loader = `
+    <svg class="board-loader" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <rect x="0" y="0" width="100" height="100" pathLength="100"
+            fill="none"
+            stroke="var(--accent)"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-dasharray="18 82"
+            vector-effect="non-scaling-stroke" />
+    </svg>
+  `;
   return `
     <div class="status">${message}</div>
-    <div class="board">${rows.join("")}</div>
+    <div class="board-wrap${pending ? " loading" : ""}">
+      <div class="board">${rows.join("")}</div>
+      ${loader}
+    </div>
   `;
 }
 
