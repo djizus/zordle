@@ -33,15 +33,20 @@ pub struct WordPack {
     pub packed: u256,
 }
 
-// One row per active game. The `id` is the Denshokan token_id minted at
-// game start — it doubles as the game key and the on-chain leaderboard
-// reference.
+// One row per active game. The `id` field is mode-dependent:
+//   - mode = 0 (daily):  id = poseidon(player, day) — one game per
+//                        account per day, no EGC token, salt derived
+//                        from `day` so all today's daily games share
+//                        the same lazy-boss tree.
+//   - mode = 1 (NFT):    id = Denshokan token_id — minted via our
+//                        embedded MinigameComponent, salt derived
+//                        from `token_id` so each NFT is its own
+//                        unique game.
+// Other invariants:
 //   - `started_at == 0` means "doesn't exist" (Dojo returns zero default).
 //   - `ended_at != 0` means the game is over (won or lost).
-//   - `final_word_id` is set on game end to whichever word the contract
-//     reveals (the surviving candidate, or any if multiple still remain).
-//   - No `seed` field — randomness comes from Cartridge VRF (Sepolia/
-//     Mainnet) or pseudo-random tx-info hash (local katana).
+//   - `final_word_id` is the word the contract reveals on game end.
+//   - No `seed` field — randomness comes from Cartridge VRF.
 #[derive(Copy, Drop, Serde)]
 #[dojo::model]
 pub struct Game {
@@ -53,6 +58,7 @@ pub struct Game {
     pub guesses_used: u8,
     pub won: bool,
     pub final_word_id: u16,
+    pub mode: u8,
 }
 
 // Per-game candidate bitmap, sharded across NUM_CHUNKS u256 chunks.

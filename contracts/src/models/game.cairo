@@ -7,9 +7,12 @@ pub mod Errors {
     pub const NOT_OWNER: felt252 = 'Game: not owner';
 }
 
+pub const MODE_DAILY: u8 = 0;
+pub const MODE_NFT: u8 = 1;
+
 #[generate_trait]
 pub impl GameImpl of GameTrait {
-    fn new(id: felt252, player: ContractAddress) -> Game {
+    fn new(id: felt252, player: ContractAddress, mode: u8) -> Game {
         Game {
             id,
             player,
@@ -18,6 +21,7 @@ pub impl GameImpl of GameTrait {
             guesses_used: 0,
             won: false,
             final_word_id: 0,
+            mode,
         }
     }
 

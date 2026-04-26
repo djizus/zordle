@@ -21,20 +21,37 @@
 
 #[starknet::interface]
 pub trait IActions<T> {
+    /// Mode 0 — daily challenge. No EGC token, no mint cost, capped to
+    /// one game per account per day. game_id is derived deterministically
+    /// from poseidon(player, day) so attempting a second start_daily on
+    /// the same UTC day reverts. Returns the derived game_id so the
+    /// client can use it to query views without recomputing.
+    fn start_daily(ref self: T) -> felt252;
+
+    /// Mode 1 — NFT. Caller must already own the Denshokan token at
+    /// `token_id` (mint via the embedded mint_game entrypoint). Each NFT
+    /// is a fresh, replayable game.
     fn start_game(ref self: T, token_id: felt252);
-    fn guess(ref self: T, token_id: felt252, word_id: u16);
-    fn surrender(ref self: T, token_id: felt252);
+
+    /// Submit a guess. game_id is whatever was returned by start_daily()
+    /// or the token_id passed to start_game(). Salt for VRF consume_random
+    /// is derived from the game's mode (read from storage).
+    fn guess(ref self: T, game_id: felt252, word_id: u16);
 }
 
 // Read-only views the web client uses to render UI. Going through the
 // contract avoids direct Dojo-storage RPC reads and Torii.
 #[starknet::interface]
 pub trait IActionsView<T> {
-    fn get_game(self: @T, token_id: felt252) -> zordle::models::index::Game;
-    fn get_chunk(self: @T, token_id: felt252, index: u8) -> u256;
-    fn get_guess(self: @T, token_id: felt252, index: u8) -> zordle::models::index::Guess;
+    fn get_game(self: @T, game_id: felt252) -> zordle::models::index::Game;
+    fn get_chunk(self: @T, game_id: felt252, index: u8) -> u256;
+    fn get_guess(self: @T, game_id: felt252, index: u8) -> zordle::models::index::Guess;
     fn get_word(self: @T, word_id: u16) -> u32;
     fn get_dictionary(self: @T) -> zordle::models::index::Dictionary;
+    /// Compute the deterministic daily game_id for `player` for the
+    /// current UTC day. Lets the client query an in-progress daily game
+    /// without having to mirror the salt derivation.
+    fn daily_game_id(self: @T, player: starknet::ContractAddress) -> felt252;
 }
 
 #[dojo::contract]
@@ -59,9 +76,9 @@ pub mod actions {
     use zordle::helpers::wordle::compute_pattern;
     use zordle::models::candidate::CandidateChunkTrait;
     use zordle::models::dictionary::DictionaryAssert;
-    use zordle::models::game::{GameAssert, GameTrait};
+    use zordle::models::game::{GameAssert, GameTrait, MODE_DAILY, MODE_NFT};
     use zordle::models::index::{Game, Guess};
-    use zordle::store::StoreTrait;
+    use zordle::store::{Store, StoreTrait};
 
     component!(path: MinigameComponent, storage: minigame, event: MinigameEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
@@ -141,12 +158,15 @@ pub mod actions {
 
     // Score view consumed by Denshokan / Budokan leaderboard. Higher = better.
     //   1/6 win → 6, 2/6 → 5, ..., 6/6 → 1, loss → 0.
+    // Only mode 1 (NFT) games expose a score — daily-mode games (mode 0)
+    // aren't tied to a token, so any token_id query returns 0 by default
+    // (Dojo zero-init).
     #[abi(embed_v0)]
     impl GameTokenDataImpl of IMinigameTokenData<ContractState> {
         fn score(self: @ContractState, token_id: felt252) -> u64 {
             let world: WorldStorage = self.world(@"zordle_0_1");
             let game: Game = StoreTrait::new(world).game(token_id);
-            if game.won && game.guesses_used <= MAX_GUESSES {
+            if game.mode == MODE_NFT && game.won && game.guesses_used <= MAX_GUESSES {
                 let score: u8 = (MAX_GUESSES + 1) - game.guesses_used;
                 score.into()
             } else {
@@ -157,7 +177,7 @@ pub mod actions {
         fn game_over(self: @ContractState, token_id: felt252) -> bool {
             let world: WorldStorage = self.world(@"zordle_0_1");
             let game: Game = StoreTrait::new(world).game(token_id);
-            game.ended_at != 0
+            game.mode == MODE_NFT && game.ended_at != 0
         }
 
         fn score_batch(self: @ContractState, token_ids: Span<felt252>) -> Array<u64> {
@@ -181,8 +201,56 @@ pub mod actions {
         }
     }
 
+    // Shared helper: write the per-game candidate bitmap for the answer
+    // pool. Used by both start_daily and start_game.
+    fn populate_candidate_bitmap(
+        ref store: Store, game_id: felt252, answer_count: u16,
+    ) {
+        let max_chunk: u256 = Bounded::<u256>::MAX;
+        let mut i: u8 = 0;
+        while i < NUM_CHUNKS {
+            let first_id: u32 = i.into() * CHUNK_BITS;
+            let next_id: u32 = (i.into() + 1) * CHUNK_BITS;
+            let bits: u256 = if next_id <= answer_count.into() {
+                max_chunk
+            } else if first_id >= answer_count.into() {
+                0
+            } else {
+                let live: u32 = answer_count.into() - first_id;
+                TwoPower::pow(live.try_into().unwrap()) - 1
+            };
+            store.set_candidate(@CandidateChunkTrait::new(game_id, i, bits));
+            i += 1;
+        }
+    }
+
+    fn compute_daily_game_id(player: ContractAddress, day: u64) -> felt252 {
+        poseidon_hash_span([player.into(), day.into()].span())
+    }
+
     #[abi(embed_v0)]
     impl ActionsImpl of super::IActions<ContractState> {
+        fn start_daily(ref self: ContractState) -> felt252 {
+            let world: WorldStorage = self.world(@"zordle_0_1");
+            let mut store = StoreTrait::new(world);
+
+            let dict = store.dictionary();
+            dict.assert_loaded();
+
+            let player = get_caller_address();
+            let day = get_block_timestamp() / 86400;
+            let game_id = compute_daily_game_id(player, day);
+
+            let existing = store.game(game_id);
+            assert(existing.started_at == 0, Errors::ALREADY_STARTED);
+
+            let game = GameTrait::new(game_id, player, MODE_DAILY);
+            store.set_game(@game);
+
+            populate_candidate_bitmap(ref store, game_id, dict.answer_count);
+            game_id
+        }
+
         fn start_game(ref self: ContractState, token_id: felt252) {
             let world: WorldStorage = self.world(@"zordle_0_1");
             let mut store = StoreTrait::new(world);
@@ -200,45 +268,30 @@ pub mod actions {
             assert(existing.started_at == 0, Errors::ALREADY_STARTED);
 
             let player = get_caller_address();
-            let game = GameTrait::new(token_id, player);
+            let game = GameTrait::new(token_id, player, MODE_NFT);
             store.set_game(@game);
 
-            // Populate NUM_CHUNKS candidate bitmap rows. The candidate set
-            // is the answer pool only (word_ids in [0, answer_count)), so
-            // mask off everything past answer_count even if the full vocab
-            // extends further.
-            let max_chunk: u256 = Bounded::<u256>::MAX;
-            let mut i: u8 = 0;
-            while i < NUM_CHUNKS {
-                let first_id: u32 = i.into() * CHUNK_BITS;
-                let next_id: u32 = (i.into() + 1) * CHUNK_BITS;
-                let bits: u256 = if next_id <= dict.answer_count.into() {
-                    max_chunk
-                } else if first_id >= dict.answer_count.into() {
-                    0
-                } else {
-                    let live: u32 = dict.answer_count.into() - first_id;
-                    TwoPower::pow(live.try_into().unwrap()) - 1
-                };
-                store.set_candidate(@CandidateChunkTrait::new(token_id, i, bits));
-                i += 1;
-            }
+            populate_candidate_bitmap(ref store, token_id, dict.answer_count);
         }
 
-        fn guess(ref self: ContractState, token_id: felt252, word_id: u16) {
+        fn guess(ref self: ContractState, game_id: felt252, word_id: u16) {
             let world: WorldStorage = self.world(@"zordle_0_1");
             let mut store = StoreTrait::new(world);
 
-            let mut game = store.game(token_id);
+            let mut game = store.game(game_id);
             game.assert_exists();
             game.assert_not_over();
             game.assert_owner(get_caller_address());
             assert(game.guesses_used < MAX_GUESSES, Errors::NO_GUESSES_LEFT);
 
+            // Only NFT mode hits the EGC ownership gate; daily mode is
+            // standalone (the start_daily call already enforced "one per
+            // account per day" via game_id derivation).
             let token_address = self.token_address();
-            if !token_address.is_zero() {
-                pre_action(token_address, token_id);
-                assert_token_ownership(token_address, token_id);
+            let is_nft = game.mode == MODE_NFT;
+            if is_nft && !token_address.is_zero() {
+                pre_action(token_address, game_id);
+                assert_token_ownership(token_address, game_id);
             }
 
             let dict = store.dictionary();
@@ -252,7 +305,7 @@ pub mod actions {
             let mut chunks: Array<u256> = array![];
             let mut i: u8 = 0;
             while i < NUM_CHUNKS {
-                chunks.append(store.candidate(token_id, i).bits);
+                chunks.append(store.candidate(game_id, i).bits);
                 i += 1;
             }
 
@@ -305,17 +358,24 @@ pub mod actions {
             // ---- Pick a uniform-random non-empty pattern via VRF ----
             let bucket_count: u32 = Bitmap::popcount(pattern_seen).into();
             assert(bucket_count > 0, Errors::NO_CANDIDATES);
-            // Daily-challenge salt: every player on day X faces the same
-            // lazy-boss behaviour for the same (turn, guess), so leaderboards
-            // are directly comparable. token_id is intentionally NOT in the
-            // salt — divergence between players comes from the guesses they
-            // pick, not from per-player randomness. The client must call
-            // request_random with this exact same salt as the multicall
-            // preamble or consume_random will revert.
-            let day: u64 = get_block_timestamp() / 86400;
-            let salt = poseidon_hash_span(
-                [day.into(), game.guesses_used.into(), word_id.into()].span(),
-            );
+            // Salt depends on mode:
+            //   - Daily (mode 0): salt = poseidon(day, turn, word_id) so
+            //     every account playing today shares the same lazy-boss
+            //     tree. Only one daily game per account per day.
+            //   - NFT (mode 1):   salt = poseidon(token_id, turn, word_id)
+            //     so each token is its own unique game.
+            // The client must encode the SAME salt into its request_random
+            // preamble call or consume_random reverts.
+            let salt: felt252 = if is_nft {
+                poseidon_hash_span(
+                    [game_id, game.guesses_used.into(), word_id.into()].span(),
+                )
+            } else {
+                let day: u64 = get_block_timestamp() / 86400;
+                poseidon_hash_span(
+                    [day.into(), game.guesses_used.into(), word_id.into()].span(),
+                )
+            };
             let vrf_addr = self.vrf_address.read();
             let mix = random_from(vrf_addr, salt);
             let mix_u256: u256 = mix.into();
@@ -350,7 +410,7 @@ pub mod actions {
                     bit_idx += 1;
                 }
                 store
-                    .set_candidate(@CandidateChunkTrait::new(token_id, chunk_index, new_bits));
+                    .set_candidate(@CandidateChunkTrait::new(game_id, chunk_index, new_bits));
                 chunk_index += 1;
             }
             // Catches drift if Pass 1 / Pass 2 diverge in iteration order.
@@ -360,7 +420,7 @@ pub mod actions {
             store
                 .set_guess(
                     @Guess {
-                        game_id: token_id,
+                        game_id,
                         index: game.guesses_used,
                         word_id,
                         pattern: chosen_pattern,
@@ -395,70 +455,27 @@ pub mod actions {
 
             store.set_game(@game);
 
-            if game_ended && !token_address.is_zero() {
-                post_action(token_address, token_id);
-            }
-        }
-
-        fn surrender(ref self: ContractState, token_id: felt252) {
-            let world: WorldStorage = self.world(@"zordle_0_1");
-            let mut store = StoreTrait::new(world);
-
-            let mut game = store.game(token_id);
-            game.assert_exists();
-            game.assert_not_over();
-            game.assert_owner(get_caller_address());
-
-            let token_address = self.token_address();
-            if !token_address.is_zero() {
-                pre_action(token_address, token_id);
-                assert_token_ownership(token_address, token_id);
-            }
-
-            // Reveal the lowest-index surviving word.
-            let mut chunk_index: u8 = 0;
-            let mut revealed: u32 = 0;
-            let mut found = false;
-            while chunk_index < NUM_CHUNKS && !found {
-                let chunk_bits = store.candidate(token_id, chunk_index).bits;
-                if chunk_bits > 0 {
-                    let mut bits = chunk_bits;
-                    let mut bit_idx: u32 = 0;
-                    while bits > 0 && (bits % 2) == 0 {
-                        bits = bits / 2;
-                        bit_idx += 1;
-                    }
-                    revealed = chunk_index.into() * CHUNK_BITS + bit_idx;
-                    found = true;
-                }
-                chunk_index += 1;
-            }
-
-            game.ended_at = get_block_timestamp();
-            game.final_word_id = revealed.try_into().unwrap();
-            store.set_game(@game);
-
-            if !token_address.is_zero() {
-                post_action(token_address, token_id);
+            if game_ended && is_nft && !token_address.is_zero() {
+                post_action(token_address, game_id);
             }
         }
     }
 
     #[abi(embed_v0)]
     impl ActionsViewImpl of super::IActionsView<ContractState> {
-        fn get_game(self: @ContractState, token_id: felt252) -> Game {
+        fn get_game(self: @ContractState, game_id: felt252) -> Game {
             let world: WorldStorage = self.world(@"zordle_0_1");
-            StoreTrait::new(world).game(token_id)
+            StoreTrait::new(world).game(game_id)
         }
 
-        fn get_chunk(self: @ContractState, token_id: felt252, index: u8) -> u256 {
+        fn get_chunk(self: @ContractState, game_id: felt252, index: u8) -> u256 {
             let world: WorldStorage = self.world(@"zordle_0_1");
-            StoreTrait::new(world).candidate(token_id, index).bits
+            StoreTrait::new(world).candidate(game_id, index).bits
         }
 
-        fn get_guess(self: @ContractState, token_id: felt252, index: u8) -> Guess {
+        fn get_guess(self: @ContractState, game_id: felt252, index: u8) -> Guess {
             let world: WorldStorage = self.world(@"zordle_0_1");
-            StoreTrait::new(world).guess(token_id, index)
+            StoreTrait::new(world).guess(game_id, index)
         }
 
         fn get_word(self: @ContractState, word_id: u16) -> u32 {
@@ -469,6 +486,13 @@ pub mod actions {
         fn get_dictionary(self: @ContractState) -> zordle::models::index::Dictionary {
             let world: WorldStorage = self.world(@"zordle_0_1");
             StoreTrait::new(world).dictionary()
+        }
+
+        fn daily_game_id(
+            self: @ContractState, player: ContractAddress,
+        ) -> felt252 {
+            let day = get_block_timestamp() / 86400;
+            compute_daily_game_id(player, day)
         }
     }
 }

@@ -1,10 +1,20 @@
-// React app shell — Cartridge Controller connect + Zordle game flow.
+// React app shell — Cartridge Controller connect + dual-mode Zordle.
 //
-// Phase machine:
-//   loading    — still hydrating dictionary / restoring active run
-//   splash     — connect wallet OR start game
-//   playing    — typing + submitting guesses
-//   ending     — final reveal + share + play again
+// Modes:
+//   daily : one game per account per day, no EGC token. salt derived
+//           from poseidon(day, turn, word). All accounts on day X share
+//           the same lazy-boss tree.
+//   nft   : Denshokan token-bound game, replayable per-token. salt
+//           derived from poseidon(token_id, turn, word). Shareable via
+//           a /nft/<id> deep link.
+//
+// Routes:
+//   /             splash — connect + pick a mode
+//   /play         daily challenge for the connected account
+//   /play/<id>    NFT game for the given token_id (hex felt)
+//
+// Phase machine within a route:
+//   loading | playing | ending
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -15,30 +25,34 @@ import {
 import { num } from "starknet";
 
 import { decodePattern, type Trit } from "./chain/state";
-import { getCandidateChunk, getDictionary, getGame, getGuess } from "./chain/views";
+import {
+  getCandidateChunk,
+  getDailyGameId,
+  getDictionary,
+  getGame,
+  getGuess,
+} from "./chain/views";
 import {
   mintGame,
-  startGame,
+  startDaily,
+  startNftGame,
   submitGuess,
 } from "./chain/contractSystems";
 
 // ---------- types ---------------------------------------------------------
 
-type Phase = "loading" | "splash" | "playing" | "ending";
+type Route =
+  | { kind: "splash" }
+  | { kind: "play"; mode: "daily" }
+  | { kind: "play"; mode: "nft"; tokenId: bigint };
+
+type Phase = "loading" | "playing" | "ending";
 
 type PastGuess = {
   word: string;
   pattern: number;
 };
 
-type SavedRun = {
-  tokenId: string;
-  past: PastGuess[];
-  active: string;
-  remainingWords?: string[];
-};
-
-const RUN_KEY = "zordle:active-run:v2";
 const CANDIDATE_CHUNKS = 10;
 const MAX_GUESSES = 6;
 
@@ -46,6 +60,30 @@ const DEMO_WORDS = [
   "crane", "stark", "cairo", "prove",
   "block", "nonce", "chain", "trace",
 ];
+
+// ---------- routing -------------------------------------------------------
+
+const parseRoute = (pathname: string): Route => {
+  // Strip trailing slash.
+  const path = pathname.replace(/\/$/, "");
+  if (path === "" || path === "/") return { kind: "splash" };
+  if (path === "/play") return { kind: "play", mode: "daily" };
+  const m = path.match(/^\/play\/(0x[0-9a-fA-F]+|[0-9]+)$/);
+  if (m) {
+    try {
+      return { kind: "play", mode: "nft", tokenId: BigInt(m[1]) };
+    } catch {
+      return { kind: "splash" };
+    }
+  }
+  return { kind: "splash" };
+};
+
+const routeToPath = (r: Route): string => {
+  if (r.kind === "splash") return "/";
+  if (r.mode === "daily") return "/play";
+  return `/play/${num.toHex(r.tokenId)}`;
+};
 
 // ---------- helpers -------------------------------------------------------
 
@@ -73,30 +111,24 @@ const letterStatus = (past: PastGuess[]): Map<string, Trit> => {
   return map;
 };
 
-// Pull the freshly-minted token_id out of the mint_game receipt. Denshokan
-// is an ERC-721, so `mint` emits a Transfer(from=0, to=owner, token_id).
-// We pick the LAST transfer matching to=our address.
+const TRANSFER_SELECTOR = num.toBigInt(
+  "0x99cd8bde557814842a3121e8ddfd433a539b8c9f14bf31ebf108d12e6196e9",
+);
+
+// Pull the freshly-minted token_id out of the mint_game receipt by finding
+// the ERC721 Transfer(0x0, our address, token_id) event.
 const extractTokenIdFromReceipt = (
   receipt: any,
   ownerAddress: string,
 ): bigint | null => {
-  const events: Array<{ keys?: string[]; data?: string[]; from_address?: string }> =
-    receipt?.events ?? [];
+  const events: Array<{ keys?: string[]; data?: string[] }> = receipt?.events ?? [];
   const ownerNorm = num.toBigInt(ownerAddress);
-  // Transfer event selector = selector!("Transfer")
-  // (0x99cd8bde557814842a3121e8ddfd433a539b8c9f14bf31ebf108d12e6196e9 is the
-  // canonical OZ ERC721 Transfer key.)
-  const TRANSFER_SELECTOR = num.toBigInt(
-    "0x99cd8bde557814842a3121e8ddfd433a539b8c9f14bf31ebf108d12e6196e9",
-  );
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const e = events[i];
     if (!e.keys || e.keys.length < 4) continue;
     if (num.toBigInt(e.keys[0]) !== TRANSFER_SELECTOR) continue;
     const to = num.toBigInt(e.keys[2]);
     if (to !== ownerNorm) continue;
-    // keys[3] = low(token_id), keys[4]? = high. ERC721 token_id is u256
-    // packed as two felts.
     const low = num.toBigInt(e.keys[3]);
     const high = e.keys[4] ? num.toBigInt(e.keys[4]) : 0n;
     return low + (high << 128n);
@@ -107,8 +139,6 @@ const extractTokenIdFromReceipt = (
 // ---------- splash demo ---------------------------------------------------
 
 function SplashDemo() {
-  // CSS animation does most of the work; we just rotate the letter content
-  // on each cell's animationiteration.
   const cellsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const root = cellsRef.current;
@@ -305,10 +335,7 @@ function Keyboard({
       {KB_ROWS.map((row, r) => (
         <div key={r} className="kb-row">
           {r === 2 && (
-            <button
-              className="key wide enter"
-              onClick={() => onKey("ENTER")}
-            >
+            <button className="key wide enter" onClick={() => onKey("ENTER")}>
               Enter
             </button>
           )}
@@ -368,8 +395,16 @@ function EndScreen({
 
 // ---------- main app ------------------------------------------------------
 
+const navigate = (route: Route) => {
+  const path = routeToPath(route);
+  if (window.location.pathname !== path) {
+    window.history.pushState({}, "", path);
+    // Trigger a popstate-like event so the app re-reads the route.
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+};
+
 export default function App() {
-  // Cartridge Controller
   const { account, address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
@@ -379,21 +414,19 @@ export default function App() {
     if (ctrl) connect({ connector: ctrl });
   }, [connect, connectors]);
 
-  // Bootstrap: dictionary load + restore active run
-  const [phase, setPhase] = useState<Phase>("loading");
+  // Route from URL.
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
+  useEffect(() => {
+    const handler = () => setRoute(parseRoute(window.location.pathname));
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  // Boot state.
+  const [bootPhase, setBootPhase] = useState<"loading" | "ready">("loading");
   const [words, setWords] = useState<string[]>([]);
   const [wordIndex, setWordIndex] = useState<Map<string, number>>(new Map());
-  const [tokenId, setTokenId] = useState<bigint | null>(null);
-  const [past, setPast] = useState<PastGuess[]>([]);
-  const [active, setActive] = useState("");
-  const [message, setMessage] = useState<React.ReactNode>("");
-  const [won, setWon] = useState(false);
-  const [finalWord, setFinalWord] = useState("");
-  const [txPending, setTxPending] = useState(false);
-  const [remainingWords, setRemainingWords] = useState<string[]>([]);
-  const [flipRowIndex, setFlipRowIndex] = useState(-1);
 
-  // ---- bootstrap (dict + restore) ----
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -407,55 +440,12 @@ export default function App() {
         if (cancelled) return;
         setWords(list);
         setWordIndex(new Map(list.map((w, i) => [w, i])));
-
         const dict = await getDictionary();
         if (cancelled) return;
-        if (!dict.loaded) {
-          setMessage("dictionary not loaded on-chain");
-          return;
-        }
-
-        // Try restoring an active run
-        const raw = localStorage.getItem(RUN_KEY);
-        if (raw) {
-          try {
-            const saved = JSON.parse(raw) as SavedRun;
-            const restoredId = BigInt(saved.tokenId);
-            const game = await getGame(restoredId);
-            if (game.startedAt !== 0n) {
-              const pastGuesses: PastGuess[] = [];
-              for (let i = 0; i < game.guessesUsed; i += 1) {
-                const g = await getGuess(restoredId, i);
-                pastGuesses.push({
-                  word: list[g.wordId] ?? "?????",
-                  pattern: g.pattern,
-                });
-              }
-              if (cancelled) return;
-              setTokenId(restoredId);
-              setPast(pastGuesses);
-              setActive(saved.active ?? "");
-              setRemainingWords(saved.remainingWords ?? []);
-              if (game.endedAt !== 0n) {
-                setWon(game.won);
-                setFinalWord(list[game.finalWordId] ?? "?????");
-                setPhase("ending");
-                localStorage.removeItem(RUN_KEY);
-              } else {
-                setPhase("playing");
-              }
-              return;
-            }
-            localStorage.removeItem(RUN_KEY);
-          } catch {
-            localStorage.removeItem(RUN_KEY);
-          }
-        }
-        setPhase("splash");
-      } catch (err) {
-        if (!cancelled) {
-          setMessage(`bootstrap failed: ${(err as Error).message}`);
-        }
+        if (!dict.loaded) return;
+        setBootPhase("ready");
+      } catch {
+        // Stay on loading; user sees "syncing chain".
       }
     })();
     return () => {
@@ -463,19 +453,318 @@ export default function App() {
     };
   }, []);
 
-  // Persist active run to localStorage on changes
-  useEffect(() => {
-    if (phase !== "playing" || tokenId === null) return;
-    const saved: SavedRun = {
-      tokenId: tokenId.toString(),
-      past,
-      active,
-      remainingWords,
-    };
-    localStorage.setItem(RUN_KEY, JSON.stringify(saved));
-  }, [phase, tokenId, past, active, remainingWords]);
+  if (bootPhase === "loading") {
+    return (
+      <>
+        <Header />
+        <p className="boot-loading">syncing chain</p>
+      </>
+    );
+  }
 
-  // Keyboard listener
+  if (route.kind === "splash") {
+    return (
+      <Splash
+        isConnected={!!isConnected}
+        address={address}
+        onConnect={handleConnect}
+        onDisconnect={() => disconnect()}
+        onPlayDaily={() => navigate({ kind: "play", mode: "daily" })}
+        onMintNft={async () => {
+          if (!account || !address) return;
+          // Mint then navigate. The Play screen will pick up where we left.
+          try {
+            const tx = await mintGame(account);
+            const r: any = await account.waitForTransaction(tx.transaction_hash);
+            const newId = extractTokenIdFromReceipt(r, address);
+            if (newId === null) throw new Error("token_id missing in mint receipt");
+            navigate({ kind: "play", mode: "nft", tokenId: newId });
+          } catch (err) {
+            // Surface to console; splash stays put.
+            console.error("[zordle] mint failed", err);
+          }
+        }}
+      />
+    );
+  }
+
+  // Play route.
+  return (
+    <Play
+      key={route.mode === "nft" ? `nft-${route.tokenId.toString()}` : "daily"}
+      route={route}
+      account={account ?? null}
+      address={address ?? null}
+      isConnected={!!isConnected}
+      onConnect={handleConnect}
+      words={words}
+      wordIndex={wordIndex}
+      onPlayAgain={() => navigate({ kind: "splash" })}
+    />
+  );
+}
+
+// ---------- splash --------------------------------------------------------
+
+function Splash({
+  isConnected,
+  address,
+  onConnect,
+  onDisconnect,
+  onPlayDaily,
+  onMintNft,
+}: {
+  isConnected: boolean;
+  address?: string;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onPlayDaily: () => void;
+  onMintNft: () => void;
+}) {
+  const [minting, setMinting] = useState(false);
+  return (
+    <>
+      <Header />
+      <section className="splash">
+        <SplashDemo />
+        {!isConnected ? (
+          <button className="btn-primary" onClick={onConnect}>
+            Connect wallet
+          </button>
+        ) : (
+          <>
+            <button className="btn-primary" onClick={onPlayDaily} disabled={minting}>
+              Daily challenge
+            </button>
+            <button
+              className="btn-ghost"
+              onClick={async () => {
+                setMinting(true);
+                try {
+                  await onMintNft();
+                } finally {
+                  setMinting(false);
+                }
+              }}
+              disabled={minting}
+            >
+              {minting ? "Minting…" : "Mint & play"}
+            </button>
+            <p className="splash-meta">
+              connected ·{" "}
+              <span className="accent">
+                {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ""}
+              </span>{" "}
+              ·{" "}
+              <button
+                onClick={onDisconnect}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "inherit",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                  padding: 0,
+                  font: "inherit",
+                  letterSpacing: "inherit",
+                }}
+              >
+                disconnect
+              </button>
+            </p>
+          </>
+        )}
+        <p className="splash-meta">
+          <strong>2,315</strong> words · <span className="accent">1</span> answer · zkorp
+        </p>
+      </section>
+    </>
+  );
+}
+
+// ---------- play (game in progress) --------------------------------------
+
+function Play({
+  route,
+  account,
+  address,
+  isConnected,
+  onConnect,
+  words,
+  wordIndex,
+  onPlayAgain,
+}: {
+  route: { kind: "play"; mode: "daily" } | { kind: "play"; mode: "nft"; tokenId: bigint };
+  account: any | null;
+  address: string | null;
+  isConnected: boolean;
+  onConnect: () => void;
+  words: string[];
+  wordIndex: Map<string, number>;
+  onPlayAgain: () => void;
+}) {
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [gameId, setGameId] = useState<bigint | null>(null);
+  const [past, setPast] = useState<PastGuess[]>([]);
+  const [active, setActive] = useState("");
+  const [message, setMessage] = useState<React.ReactNode>("");
+  const [won, setWon] = useState(false);
+  const [finalWord, setFinalWord] = useState("");
+  const [txPending, setTxPending] = useState(false);
+  const [remainingWords, setRemainingWords] = useState<string[]>([]);
+  const [flipRowIndex, setFlipRowIndex] = useState(-1);
+
+  const tokenId: bigint | null = route.mode === "nft" ? route.tokenId : null;
+
+  // Resolve the on-chain game_id for this route + start it if needed.
+  useEffect(() => {
+    if (!isConnected || !account || !address) {
+      setMessage("connect wallet to play");
+      setPhase("loading");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        let id: bigint;
+        if (route.mode === "nft") {
+          id = route.tokenId;
+        } else {
+          id = await getDailyGameId(address);
+        }
+        if (cancelled) return;
+        setGameId(id);
+
+        // Fetch existing game state.
+        const game = await getGame(id);
+        if (cancelled) return;
+
+        if (game.startedAt === 0n) {
+          // Not started — kick off the start tx.
+          setMessage(<>starting<span className="dots"></span></>);
+          setTxPending(true);
+          setPhase("playing");
+          try {
+            const tx =
+              route.mode === "nft"
+                ? await startNftGame(account, route.tokenId)
+                : await startDaily(account);
+            await account.waitForTransaction(tx.transaction_hash);
+            await refresh(id);
+            setMessage(<>guess <span className="accent">1</span> of 6</>);
+          } catch (err) {
+            setMessage(`error: ${(err as Error).message}`);
+          } finally {
+            if (!cancelled) setTxPending(false);
+          }
+          return;
+        }
+
+        // Already started — load past guesses.
+        const pastGuesses: PastGuess[] = [];
+        for (let i = 0; i < game.guessesUsed; i += 1) {
+          const g = await getGuess(id, i);
+          pastGuesses.push({
+            word: words[g.wordId] ?? "?????",
+            pattern: g.pattern,
+          });
+        }
+        if (cancelled) return;
+        setPast(pastGuesses);
+        if (game.endedAt !== 0n) {
+          setWon(game.won);
+          setFinalWord(words[game.finalWordId] ?? "?????");
+          setPhase("ending");
+        } else {
+          setMessage(<>guess <span className="accent">{game.guessesUsed + 1}</span> of 6</>);
+          await refresh(id);
+          setPhase("playing");
+        }
+      } catch (err) {
+        if (!cancelled) setMessage(`error: ${(err as Error).message}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, address, route.mode, tokenId?.toString(), words.length]);
+
+  const refresh = async (id: bigint) => {
+    const out: string[] = [];
+    for (let chunk = 0; chunk < CANDIDATE_CHUNKS; chunk += 1) {
+      let bits = await getCandidateChunk(id, chunk);
+      let bit = 0;
+      while (bits > 0n) {
+        if ((bits & 1n) === 1n) {
+          const wid = chunk * 256 + bit;
+          const w = words[wid];
+          if (w) out.push(w);
+        }
+        bits >>= 1n;
+        bit += 1;
+      }
+    }
+    setRemainingWords(out);
+  };
+
+  const handleSubmit = useCallback(async () => {
+    if (!account || !gameId || active.length !== 5) {
+      if (active.length !== 5) setMessage("need 5 letters");
+      return;
+    }
+    const wid = wordIndex.get(active.toLowerCase());
+    if (wid === undefined) {
+      setMessage(`"${active.toUpperCase()}" not in dictionary`);
+      return;
+    }
+    const submitted = active;
+    const guessesUsed = past.length;
+    setMessage(<>guess <span className="accent">{guessesUsed + 1}</span> of 6 · processing<span className="dots"></span></>);
+    setTxPending(true);
+    try {
+      const tx = await submitGuess(account, gameId, tokenId, guessesUsed, wid);
+      await account.waitForTransaction(tx.transaction_hash);
+      const g = await getGuess(gameId, guessesUsed);
+      const game = await getGame(gameId);
+      const newPast = [...past, { word: submitted, pattern: g.pattern }];
+      setPast(newPast);
+      setActive("");
+      setFlipRowIndex(newPast.length - 1);
+      setMessage(<>guess <span className="accent">{newPast.length}</span> of 6</>);
+      if (game.endedAt !== 0n) {
+        setWon(game.won);
+        setFinalWord(words[game.finalWordId] ?? "?????");
+        setPhase("ending");
+      } else {
+        await refresh(gameId);
+      }
+    } catch (err) {
+      setMessage(`error: ${(err as Error).message}`);
+    } finally {
+      setTxPending(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, gameId, tokenId, active, past, wordIndex, words]);
+
+  const handleKey = useCallback(
+    (key: string) => {
+      if (txPending) return;
+      if (key === "ENTER") {
+        void handleSubmit();
+        return;
+      }
+      if (key === "BACK") {
+        setActive((a) => a.slice(0, -1));
+        return;
+      }
+      if (key.startsWith("letter:")) {
+        setActive((a) => (a.length < 5 ? a + key.slice("letter:".length) : a));
+      }
+    },
+    [txPending, handleSubmit],
+  );
+
   useEffect(() => {
     if (phase !== "playing") return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -487,120 +776,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, txPending, active, past, tokenId]);
-
-  const refreshRemainingWords = useCallback(
-    async (id: bigint) => {
-      const out: string[] = [];
-      for (let chunk = 0; chunk < CANDIDATE_CHUNKS; chunk += 1) {
-        let bits = await getCandidateChunk(id, chunk);
-        let bit = 0;
-        while (bits > 0n) {
-          if ((bits & 1n) === 1n) {
-            const wid = chunk * 256 + bit;
-            const w = words[wid];
-            if (w) out.push(w);
-          }
-          bits >>= 1n;
-          bit += 1;
-        }
-      }
-      setRemainingWords(out);
-    },
-    [words],
-  );
-
-  const handleStart = useCallback(async () => {
-    if (!account || !address) return;
-    setMessage(<>starting<span className="dots"></span></>);
-    setTxPending(true);
-    setPhase("playing");
-    setPast([]);
-    setActive("");
-    setRemainingWords([]);
-    setWon(false);
-    setFinalWord("");
-    try {
-      // 1) Mint a Denshokan token
-      const mintTx = await mintGame(account);
-      const mintReceipt: any = await account.waitForTransaction(mintTx.transaction_hash);
-      const newId = extractTokenIdFromReceipt(mintReceipt, address);
-      if (newId === null) {
-        throw new Error("could not extract token_id from mint_game receipt");
-      }
-      setTokenId(newId);
-      // 2) Initialise the game
-      const startTx = await startGame(account, newId);
-      await account.waitForTransaction(startTx.transaction_hash);
-      await refreshRemainingWords(newId);
-      setMessage(<>guess <span className="accent">1</span> of 6</>);
-    } catch (err) {
-      setMessage(`error: ${(err as Error).message}`);
-      setPhase("splash");
-    } finally {
-      setTxPending(false);
-    }
-  }, [account, address, refreshRemainingWords]);
-
-  const handleSubmit = useCallback(async () => {
-    if (!account || !tokenId || active.length !== 5) {
-      setMessage("need 5 letters");
-      return;
-    }
-    const wordId = wordIndex.get(active.toLowerCase());
-    if (wordId === undefined) {
-      setMessage(`"${active.toUpperCase()}" not in dictionary`);
-      return;
-    }
-    const submitted = active;
-    const guessesUsed = past.length;
-    const next = guessesUsed + 1;
-    setMessage(<>guess <span className="accent">{next}</span> of 6 · processing<span className="dots"></span></>);
-    setTxPending(true);
-    try {
-      const tx = await submitGuess(account, tokenId, guessesUsed, wordId);
-      await account.waitForTransaction(tx.transaction_hash);
-      // Refetch the on-chain state for the just-submitted guess
-      const g = await getGuess(tokenId, guessesUsed);
-      const game = await getGame(tokenId);
-      const newPast = [
-        ...past,
-        { word: submitted, pattern: g.pattern },
-      ];
-      setPast(newPast);
-      setActive("");
-      setFlipRowIndex(newPast.length - 1);
-      setMessage(<>guess <span className="accent">{newPast.length}</span> of 6</>);
-      if (game.endedAt !== 0n) {
-        setWon(game.won);
-        setFinalWord(words[game.finalWordId] ?? "?????");
-        setPhase("ending");
-        localStorage.removeItem(RUN_KEY);
-      } else {
-        await refreshRemainingWords(tokenId);
-      }
-    } catch (err) {
-      setMessage(`error: ${(err as Error).message}`);
-    } finally {
-      setTxPending(false);
-    }
-  }, [account, tokenId, active, past, wordIndex, words, refreshRemainingWords]);
-
-  function handleKey(key: string) {
-    if (txPending) return;
-    if (key === "ENTER") {
-      void handleSubmit();
-      return;
-    }
-    if (key === "BACK") {
-      if (active.length > 0) setActive(active.slice(0, -1));
-      return;
-    }
-    if (key.startsWith("letter:") && active.length < 5) {
-      setActive(active + key.slice("letter:".length));
-    }
-  }
+  }, [phase, handleKey]);
 
   const handleShare = useCallback(async () => {
     const score = won ? `${past.length}/6` : "X/6";
@@ -616,85 +792,38 @@ export default function App() {
         return row;
       })
       .join("\n");
-    const text = [`zordle ${score}`, rows, "verified · zkorp.xyz/zordle"].join("\n");
+    const link =
+      route.mode === "nft"
+        ? `${window.location.origin}/play/${num.toHex(route.tokenId)}`
+        : `${window.location.origin}/play`;
+    const text = [`zordle ${score}`, rows, link].join("\n");
     try {
       await navigator.clipboard.writeText(text);
       setMessage("copied result");
     } catch {
       setMessage("share failed");
     }
-  }, [won, past]);
+  }, [won, past, route]);
 
-  const handlePlayAgain = useCallback(() => {
-    setPhase("splash");
-    setPast([]);
-    setActive("");
-    setTokenId(null);
-    setRemainingWords([]);
-    setWon(false);
-    setFinalWord("");
-    setMessage("");
-  }, []);
-
-  // ---- render ----------------------------------------------------------
+  if (!isConnected) {
+    return (
+      <>
+        <Header />
+        <section className="splash">
+          <p className="splash-meta">connect to continue</p>
+          <button className="btn-primary" onClick={onConnect}>
+            Connect wallet
+          </button>
+        </section>
+      </>
+    );
+  }
 
   if (phase === "loading") {
     return (
       <>
         <Header />
-        <p className="boot-loading">syncing chain</p>
-      </>
-    );
-  }
-
-  if (phase === "splash") {
-    return (
-      <>
-        <Header />
-        <section className="splash">
-          <SplashDemo />
-          {!isConnected ? (
-            <button className="btn-primary" onClick={handleConnect}>
-              Connect wallet
-            </button>
-          ) : (
-            <>
-              <button
-                className="btn-primary"
-                onClick={handleStart}
-                disabled={txPending}
-              >
-                Start game
-              </button>
-              <p className="splash-meta">
-                connected ·{" "}
-                <span className="accent">
-                  {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ""}
-                </span>{" "}
-                ·{" "}
-                <button
-                  className="link-like"
-                  onClick={() => disconnect()}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "inherit",
-                    textTransform: "uppercase",
-                    cursor: "pointer",
-                    padding: 0,
-                    font: "inherit",
-                    letterSpacing: "inherit",
-                  }}
-                >
-                  disconnect
-                </button>
-              </p>
-            </>
-          )}
-          <p className="splash-meta">
-            <strong>2,315</strong> words · <span className="accent">1</span> answer · zkorp
-          </p>
-        </section>
+        <p className="boot-loading">{message}</p>
       </>
     );
   }
@@ -716,7 +845,7 @@ export default function App() {
     );
   }
 
-  // phase === "ending"
+  // ending
   const score = won ? `${past.length}/6` : "X/6";
   return (
     <>
@@ -731,7 +860,7 @@ export default function App() {
       <EndScreen
         won={won}
         finalWord={finalWord}
-        onPlayAgain={handlePlayAgain}
+        onPlayAgain={onPlayAgain}
         onShare={handleShare}
       />
     </>

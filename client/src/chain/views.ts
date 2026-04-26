@@ -36,9 +36,14 @@ export const getGuess = async (tokenId: bigint, index: number): Promise<Guess> =
   decodeGuess(await view("get_guess", [tokenId, index]));
 
 export const getCandidateChunk = async (
-  tokenId: bigint,
+  gameId: bigint,
   index: number,
 ): Promise<bigint> => {
-  const [low, high = "0"] = await view("get_chunk", [tokenId, index]);
+  const [low, high = "0"] = await view("get_chunk", [gameId, index]);
   return BigInt(low) + (BigInt(high) << 128n);
+};
+
+export const getDailyGameId = async (player: string): Promise<bigint> => {
+  const [out] = await view("daily_game_id", [player]);
+  return BigInt(out);
 };
