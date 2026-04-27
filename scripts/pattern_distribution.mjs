@@ -10,9 +10,10 @@
 //   node scripts/pattern_distribution.mjs                 # default opener: trace
 //   node scripts/pattern_distribution.mjs slate           # custom opener
 //   node scripts/pattern_distribution.mjs trace --full    # dump all rows
-//   node scripts/pattern_distribution.mjs --pool=curated # use curated candidates
-//   node scripts/pattern_distribution.mjs --pool=combined # use full 12972 vocab as candidates
-//   node scripts/pattern_distribution.mjs --coarsen=all   # compare all coarsening modes
+//   node scripts/pattern_distribution.mjs --pool=merged   # full 14855 vocab as candidates
+//
+// To experiment with a custom pool (e.g. a curated answer set), regenerate
+// it via scripts/curate_answers.mjs and add an entry to POOLS below.
 //
 // Pattern encoding matches contracts/src/helpers/wordle.cairo:compute_pattern:
 //   trit per position: 0 = grey, 1 = yellow, 2 = green
@@ -36,8 +37,6 @@ const poolName = poolFlag ? poolFlag.slice("--pool=".length) : "answers";
 
 const POOLS = {
   answers: "shuffled_real_wordles.txt",
-  curated: "curated_answer_candidates.txt",
-  combined: "combined_wordlist.txt",
   merged: "merged_valid_wordles.txt",
 };
 const poolFile = POOLS[poolName];
