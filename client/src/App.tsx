@@ -15,7 +15,7 @@
 // Phase machine within a route:
 //   loading | playing | ending
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useAccount,
   useDisconnect,
@@ -24,12 +24,12 @@ import { num } from "starknet";
 
 import { decodePattern, type Trit } from "./chain/state";
 import {
-  getCandidateChunk,
   getActiveGameId,
   getDictionary,
   getGame,
   getGuess,
 } from "./chain/views";
+import { filterVocabByFeedback } from "./wordle";
 import {
   startPractice,
   startNftGame,
@@ -59,8 +59,7 @@ type Toast = {
 };
 
 const MAX_GUESSES = 6;
-const CHUNK_BITS = 256;
-const DEFAULT_ANSWER_COUNT = 2315;
+const DEFAULT_WORD_COUNT = 14855;
 
 const DEMO_WORDS = [
   "crane", "stark", "prove", "block", "chain",
@@ -318,7 +317,16 @@ function LoadingState({ message }: { message: React.ReactNode }) {
 
 // ---------- candidate strip ----------------------------------------------
 
-function CandidateStrip({ remaining }: { remaining: string[] }) {
+// Cap the carousel at this many DOM nodes. The label still shows the full
+// count, but rendering all 14,855 spans (the unfiltered vocab on turn 0)
+// causes ~50ms input lag per keystroke from React reconciliation.
+const STRIP_MAX_WORDS = 100;
+
+const CandidateStrip = memo(function CandidateStrip({
+  remaining,
+}: {
+  remaining: string[];
+}) {
   const count = remaining.length;
   if (count === 0) {
     return (
@@ -330,10 +338,12 @@ function CandidateStrip({ remaining }: { remaining: string[] }) {
       </section>
     );
   }
-  const trackClass = count > 3 ? "candidate-track" : "candidate-track static";
-  const duration = Math.round(((count * 80 + 320) / 80) * 1000);
+  const displayed =
+    count > STRIP_MAX_WORDS ? remaining.slice(0, STRIP_MAX_WORDS) : remaining;
+  const trackClass = displayed.length > 3 ? "candidate-track" : "candidate-track static";
+  const duration = Math.round(((displayed.length * 80 + 320) / 80) * 1000);
   return (
-    <section className="candidate-strip" aria-label="surviving candidate words">
+    <section className="candidate-strip" aria-label="valid guesses consistent with feedback">
       <div className="candidate-label">
         <span className="count">{count.toLocaleString()}</span> remaining
       </div>
@@ -342,14 +352,14 @@ function CandidateStrip({ remaining }: { remaining: string[] }) {
           className={trackClass}
           style={{ ["--track-duration" as any]: `${duration}ms` }}
         >
-          {remaining.map((w, i) => (
+          {displayed.map((w, i) => (
             <span key={i} className="candidate-word">{w}</span>
           ))}
         </div>
       </div>
     </section>
   );
-}
+});
 
 // ---------- keyboard ------------------------------------------------------
 
@@ -468,7 +478,7 @@ export default function App() {
   const [bootPhase, setBootPhase] = useState<"loading" | "ready">("loading");
   const [words, setWords] = useState<string[]>([]);
   const [wordIndex, setWordIndex] = useState<Map<string, number>>(new Map());
-  const [answerCount, setAnswerCount] = useState(DEFAULT_ANSWER_COUNT);
+  const [wordCount, setWordCount] = useState(DEFAULT_WORD_COUNT);
 
   useEffect(() => {
     let cancelled = false;
@@ -485,7 +495,7 @@ export default function App() {
         setWordIndex(new Map(list.map((w, i) => [w, i])));
         try {
           const dict = await getDictionary(networkForMode("practice"));
-          if (!cancelled && dict.answerCount > 0) setAnswerCount(dict.answerCount);
+          if (!cancelled && dict.wordCount > 0) setWordCount(dict.wordCount);
         } catch {
           // Keep the bundled dictionary fallback for splash metadata.
         }
@@ -518,7 +528,7 @@ export default function App() {
         toasts={toasts}
         onDismissToast={dismissToast}
         onPlayPractice={() => navigate({ kind: "play", mode: "practice" })}
-        answerCount={answerCount}
+        wordCount={wordCount}
       />
     );
   }
@@ -553,7 +563,7 @@ function Splash({
   toasts,
   onDismissToast,
   onPlayPractice,
-  answerCount,
+  wordCount,
 }: {
   isConnected: boolean;
   address?: string;
@@ -561,7 +571,7 @@ function Splash({
   toasts: Toast[];
   onDismissToast: (id: number) => void;
   onPlayPractice: () => void;
-  answerCount: number;
+  wordCount: number;
 }) {
   return (
     <>
@@ -609,7 +619,7 @@ function Splash({
           </>
         )}
         <p className="splash-meta">
-          <strong>{answerCount.toLocaleString()}</strong> words · <span className="accent">1</span> answer · zkorp
+          <strong>{wordCount.toLocaleString()}</strong> words · <span className="accent">1</span> answer · zkorp
         </p>
       </section>
     </>
@@ -649,9 +659,18 @@ function Play({
   const [won, setWon] = useState(false);
   const [finalWord, setFinalWord] = useState("");
   const [txPending, setTxPending] = useState(false);
-  const [remainingWords, setRemainingWords] = useState<string[]>([]);
   const [flipRowIndex, setFlipRowIndex] = useState(-1);
   const [restartNonce, setRestartNonce] = useState(0);
+
+  // Live narrowing of the full 14855-word guess vocab against past feedback.
+  // We deliberately don't read the on-chain answer-pool candidate bitmap
+  // here — that would tell the player exactly which 2315-pool words are
+  // still possible, which is too much hand-holding. The strip below shows
+  // "valid guesses consistent with your feedback" instead, computed locally.
+  const remainingWords = useMemo(
+    () => filterVocabByFeedback(words, past),
+    [words, past],
+  );
 
   const tokenId: bigint | null = route.mode === "nft" ? route.tokenId : null;
 
@@ -705,7 +724,6 @@ function Play({
             if (tokenId === null) throw new Error("missing NFT token id");
             const tx = await startNftGame(network, account, tokenId);
             await account.waitForTransaction(tx.transaction_hash);
-            await refresh(id);
             setMessage(<>guess <span className="accent">1</span> of 6</>);
           } catch (err) {
             onToast(errorMessage(err));
@@ -717,7 +735,6 @@ function Play({
 
         if (game.answerCount !== 0 && game.answerCount !== dict.answerCount) {
           setMessage("dictionary changed · start a fresh game");
-          setRemainingWords([]);
           setPhase("loading");
           return;
         }
@@ -739,7 +756,6 @@ function Play({
           setPhase("ending");
         } else {
           setMessage(<>guess <span className="accent">{game.guessesUsed + 1}</span> of 6</>);
-          await refresh(id);
           setPhase("playing");
         }
       } catch (err) {
@@ -765,26 +781,6 @@ function Play({
     onToast,
     restartNonce,
   ]);
-
-  const refresh = async (id: bigint) => {
-    const dict = await getDictionary(network);
-    const candidateChunks = Math.ceil(dict.answerCount / CHUNK_BITS);
-    const out: string[] = [];
-    for (let chunk = 0; chunk < candidateChunks; chunk += 1) {
-      let bits = await getCandidateChunk(network, id, chunk);
-      let bit = 0;
-      while (bits > 0n) {
-        if ((bits & 1n) === 1n) {
-          const wid = chunk * 256 + bit;
-          const w = words[wid];
-          if (w) out.push(w);
-        }
-        bits >>= 1n;
-        bit += 1;
-      }
-    }
-    setRemainingWords(out);
-  };
 
   const handleSubmit = useCallback(async () => {
     if (!account || !gameId || active.length !== 5) {
@@ -814,8 +810,6 @@ function Play({
         setWon(game.won);
         setFinalWord(words[game.finalWordId] ?? "?????");
         setPhase("ending");
-      } else {
-        await refresh(gameId);
       }
     } catch (err) {
       onToast(errorMessage(err));
@@ -896,7 +890,6 @@ function Play({
     setWon(false);
     setFinalWord("");
     setTxPending(false);
-    setRemainingWords([]);
     setFlipRowIndex(-1);
     setRestartNonce((n) => n + 1);
   }, [route.mode, onPlayAgain]);
