@@ -838,7 +838,7 @@ button#share-result:hover {
 }
 
 .end-actions > .play-again {
-  flex: 2 1 0;
+  flex: 1.5 1 0;
 }
 
 @keyframes reveal-rise {
