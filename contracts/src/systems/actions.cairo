@@ -230,7 +230,7 @@ pub mod actions {
 
     // Largest u128 r such that r^5 <= target. Doubling search to bracket the
     // root in O(log target), then binary search inside the bracket. Replaces
-    // an earlier linear scan whose worst case (root ≈ 580 for a full 2315
+    // an earlier linear scan whose worst case (root = 491 for a full 2315
     // pool) dominated selection cost.
     fn fifth_root(target: u128) -> u128 {
         if target == 0 {
