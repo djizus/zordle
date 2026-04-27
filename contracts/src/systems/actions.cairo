@@ -612,4 +612,57 @@ pub mod actions {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{bucket_weight, fifth_root};
+
+        // bucket_weight(count) = floor(count^0.8) = floor(fifth_root(count^4)).
+        // Hand-computed expected values cover edge cases, monotonicity
+        // boundaries, and the realistic full-pool maximum.
+        #[test]
+        fn test_bucket_weight_known_values() {
+            assert_eq!(bucket_weight(0), 0);
+            assert_eq!(bucket_weight(1), 1);
+            assert_eq!(bucket_weight(2), 1); // 2^4 = 16, 1^5=1 <= 16 < 32 = 2^5
+            assert_eq!(bucket_weight(3), 2); // 3^4 = 81, 2^5=32 <= 81 < 243
+            assert_eq!(bucket_weight(10), 6); // 10^4=10000, 6^5=7776 <= 10000 < 16807
+            assert_eq!(bucket_weight(100), 39); // 100^4=1e8, 39^5≈9.0e7, 40^5≈1.02e8
+            assert_eq!(bucket_weight(246), 81); // largest single bucket on a 2315 pool
+            assert_eq!(bucket_weight(2315), 491); // full-pool extreme: 491^5 < 2315^4 < 492^5
+        }
+
+        // bucket_weight is non-decreasing: larger buckets are never weighted
+        // less than smaller ones. Anything else would invert the difficulty
+        // curve.
+        #[test]
+        fn test_bucket_weight_monotonic_small_range() {
+            let mut prev: u32 = 0;
+            let mut count: u32 = 0;
+            while count <= 64 {
+                let w = bucket_weight(count);
+                assert!(w >= prev, "bucket_weight non-monotonic");
+                prev = w;
+                count += 1;
+            }
+        }
+
+        // fifth_root invariant: r^5 <= target < (r+1)^5 for every r returned.
+        #[test]
+        fn test_fifth_root_invariant() {
+            let mut count: u128 = 0;
+            while count <= 64 {
+                let target = count * count * count * count;
+                let r = fifth_root(target);
+                let r5 = r * r * r * r * r;
+                assert!(r5 <= target, "fifth_root: r^5 > target");
+                if target > 0 {
+                    let rp1 = r + 1;
+                    let rp1_5 = rp1 * rp1 * rp1 * rp1 * rp1;
+                    assert!(target < rp1_5, "fifth_root: (r+1)^5 <= target");
+                }
+                count += 1;
+            }
+        }
+    }
 }
