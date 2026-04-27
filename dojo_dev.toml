@@ -13,3 +13,8 @@ default = "zordle_0_1"
 # scripts/dev_up.sh replaces this with the prefunded katana account before
 # running `sozo migrate`, then restores the checked-in file.
 "zordle_0_1-setup" = ["0x0"]
+# Actions dojo_init args: creator_address, denshokan_address,
+# Option<renderer>::None (tag 0x1), vrf_address. All zero for dev — no
+# Denshokan/Budokan integration locally, and the contract falls back to
+# pseudo-random when vrf_address is 0.
+"zordle_0_1-actions" = ["0x0", "0x0", "0x1", "0x0"]

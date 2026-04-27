@@ -228,17 +228,36 @@ pub mod actions {
         )
     }
 
+    // Largest u128 r such that r^5 <= target. Doubling search to bracket the
+    // root in O(log target), then binary search inside the bracket. Replaces
+    // an earlier linear scan whose worst case (root ≈ 580 for a full 2315
+    // pool) dominated selection cost.
+    fn fifth_root(target: u128) -> u128 {
+        if target == 0 {
+            return 0;
+        }
+        let mut hi: u128 = 1;
+        while hi * hi * hi * hi * hi <= target {
+            hi = hi * 2;
+        }
+        let mut lo: u128 = hi / 2;
+        while lo + 1 < hi {
+            let mid: u128 = (lo + hi) / 2;
+            let mid5: u128 = mid * mid * mid * mid * mid;
+            if mid5 <= target {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
     fn bucket_weight(count: u32) -> u32 {
         // Integer approximation of count^0.8 = fifth_root(count^4).
         let count_u128: u128 = count.into();
         let target: u128 = count_u128 * count_u128 * count_u128 * count_u128;
-        let mut root: u128 = 0;
-        let mut next: u128 = 1;
-        while next * next * next * next * next <= target {
-            root = next;
-            next += 1;
-        }
-        root.try_into().unwrap()
+        fifth_root(target).try_into().unwrap()
     }
 
     #[abi(embed_v0)]
