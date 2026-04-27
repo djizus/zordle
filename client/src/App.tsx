@@ -15,7 +15,7 @@
 // Phase machine within a route:
 //   loading | playing | ending
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useAccount,
   useDisconnect,
@@ -317,7 +317,16 @@ function LoadingState({ message }: { message: React.ReactNode }) {
 
 // ---------- candidate strip ----------------------------------------------
 
-function CandidateStrip({ remaining }: { remaining: string[] }) {
+// Cap the carousel at this many DOM nodes. The label still shows the full
+// count, but rendering all 14,855 spans (the unfiltered vocab on turn 0)
+// causes ~50ms input lag per keystroke from React reconciliation.
+const STRIP_MAX_WORDS = 100;
+
+const CandidateStrip = memo(function CandidateStrip({
+  remaining,
+}: {
+  remaining: string[];
+}) {
   const count = remaining.length;
   if (count === 0) {
     return (
@@ -329,8 +338,10 @@ function CandidateStrip({ remaining }: { remaining: string[] }) {
       </section>
     );
   }
-  const trackClass = count > 3 ? "candidate-track" : "candidate-track static";
-  const duration = Math.round(((count * 80 + 320) / 80) * 1000);
+  const displayed =
+    count > STRIP_MAX_WORDS ? remaining.slice(0, STRIP_MAX_WORDS) : remaining;
+  const trackClass = displayed.length > 3 ? "candidate-track" : "candidate-track static";
+  const duration = Math.round(((displayed.length * 80 + 320) / 80) * 1000);
   return (
     <section className="candidate-strip" aria-label="valid guesses consistent with feedback">
       <div className="candidate-label">
@@ -341,14 +352,14 @@ function CandidateStrip({ remaining }: { remaining: string[] }) {
           className={trackClass}
           style={{ ["--track-duration" as any]: `${duration}ms` }}
         >
-          {remaining.map((w, i) => (
+          {displayed.map((w, i) => (
             <span key={i} className="candidate-word">{w}</span>
           ))}
         </div>
       </div>
     </section>
   );
-}
+});
 
 // ---------- keyboard ------------------------------------------------------
 
