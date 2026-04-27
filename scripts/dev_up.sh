@@ -16,6 +16,15 @@ mkdir -p "$LOG_DIR"
 KATANA_LOG="$LOG_DIR/katana.log"
 PID_FILE="$LOG_DIR/katana.pid"
 RPC="http://localhost:5050"
+DOJO_CONFIG="$ROOT/dojo_dev.toml"
+DOJO_CONFIG_BAK="$LOG_DIR/dojo_dev.toml.bak"
+
+restore_dojo_config() {
+  if [[ -f "$DOJO_CONFIG_BAK" ]]; then
+    mv "$DOJO_CONFIG_BAK" "$DOJO_CONFIG"
+  fi
+}
+trap restore_dojo_config EXIT
 
 # --- 1. (re)start katana --------------------------------------------------
 
@@ -65,6 +74,13 @@ fi
 
 echo "Account: $ACCOUNT"
 
+# The setup contract locks dictionary loading to this account. Keep the
+# checked-in profile generic and patch the init arg only for this migration.
+cp "$DOJO_CONFIG" "$DOJO_CONFIG_BAK"
+SETUP_ADMIN="$ACCOUNT" perl -0pi -e \
+  's/("zordle_0_1-setup"\s*=\s*\[\s*)"[^\"]+"/$1"$ENV{SETUP_ADMIN}"/s' \
+  "$DOJO_CONFIG"
+
 # --- 3. build + migrate ---------------------------------------------------
 
 echo "Building..."
@@ -97,9 +113,18 @@ echo "Setup:   $SETUP"
 
 cat > "$ROOT/client/.env.local" <<EOF
 VITE_PUBLIC_NODE_URL=$RPC
-VITE_PUBLIC_BURNER_ADDRESS=$ACCOUNT
-VITE_PUBLIC_BURNER_PRIVATE_KEY=$PRIVKEY
+VITE_PUBLIC_NODE_URL_DAILY=$RPC
+VITE_PUBLIC_NODE_URL_NFT=$RPC
+VITE_PUBLIC_NAMESPACE=zordle_0_1
+VITE_PUBLIC_NAMESPACE_DAILY=zordle_0_1
+VITE_PUBLIC_NAMESPACE_NFT=zordle_0_1
+VITE_PUBLIC_CHAIN_ID_DAILY=KATANA
+VITE_PUBLIC_CHAIN_ID_NFT=KATANA
 VITE_PUBLIC_ACTIONS_ADDRESS=$ACTIONS
+VITE_PUBLIC_ACTIONS_ADDRESS_DAILY=$ACTIONS
+VITE_PUBLIC_ACTIONS_ADDRESS_NFT=$ACTIONS
+VITE_PUBLIC_VRF_ADDRESS_DAILY=0x0
+VITE_PUBLIC_VRF_ADDRESS_NFT=0x0
 EOF
 
 mkdir -p "$ROOT/client/public"

@@ -29,15 +29,15 @@ const MAINNET_RPC_URL = "https://api.cartridge.gg/x/starknet/mainnet";
 const VRF_ADDRESS =
   "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f";
 
-const ACTIONS_ADDRESS = import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS;
-const NAMESPACE = import.meta.env.VITE_PUBLIC_NAMESPACE ?? "zordle_0_1";
-const SLOT = import.meta.env.VITE_PUBLIC_SLOT ?? "zordle-sepolia";
-
-if (!ACTIONS_ADDRESS) {
-  throw new Error(
-    "VITE_PUBLIC_ACTIONS_ADDRESS is not set. Run scripts/deploy_sepolia.sh first.",
-  );
-}
+const ACTIONS_ADDRESS =
+  import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS_NFT ??
+  import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS ??
+  "0x1";
+const NAMESPACE =
+  import.meta.env.VITE_PUBLIC_NAMESPACE_NFT ??
+  import.meta.env.VITE_PUBLIC_NAMESPACE ??
+  "zordle_0_1";
+const SLOT = import.meta.env.VITE_PUBLIC_SLOT_NFT ?? import.meta.env.VITE_PUBLIC_SLOT ?? "zordle-sepolia";
 
 const stringToFelt = (v: string) =>
   v ? shortString.encodeShortString(v) : "0x0";
@@ -48,7 +48,6 @@ const stringToFelt = (v: string) =>
 const ACTIONS_METHODS = [
   { name: "Start game", entrypoint: "start_game" },
   { name: "Guess", entrypoint: "guess" },
-  { name: "Surrender", entrypoint: "surrender" },
   { name: "Mint game", entrypoint: "mint_game" },
 ];
 

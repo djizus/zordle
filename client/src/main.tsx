@@ -7,12 +7,9 @@ import { StarknetConfig, jsonRpcProvider, voyager } from "@starknet-react/core";
 import { sepolia } from "@starknet-react/chains";
 
 import { cartridgeConnector } from "./cartridgeConnector";
+import { NFT_NETWORK } from "./networkConfig";
 import App from "./App";
 import "./style.css";
-
-const RPC_URL =
-  import.meta.env.VITE_PUBLIC_NODE_URL ??
-  "https://api.cartridge.gg/x/starknet/sepolia";
 
 ReactDOM.createRoot(document.getElementById("app")!).render(
   <React.StrictMode>
@@ -22,7 +19,7 @@ ReactDOM.createRoot(document.getElementById("app")!).render(
       connectors={[cartridgeConnector]}
       defaultChainId={sepolia.id}
       explorer={voyager}
-      provider={jsonRpcProvider({ rpc: () => ({ nodeUrl: RPC_URL }) })}
+      provider={jsonRpcProvider({ rpc: () => ({ nodeUrl: NFT_NETWORK.rpcUrl }) })}
     >
       <App />
     </StarknetConfig>

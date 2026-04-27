@@ -5,6 +5,8 @@ pub const GREY: u8 = 0;
 pub const YELLOW: u8 = 1;
 pub const GREEN: u8 = 2;
 
+use crate::constants::{ALPHABET_SIZE, WORD_LENGTH};
+
 // 2^5 powers used for letter packing (5 bits per letter).
 const SHIFT_1: u32 = 32;
 const SHIFT_2: u32 = 1024;
@@ -29,13 +31,20 @@ pub fn pack_word(l0: u8, l1: u8, l2: u8, l3: u8, l4: u8) -> u32 {
 
 // Convenience for the loader script: pack a Span<u8> of length 5.
 pub fn pack_letters(letters: Span<u8>) -> u32 {
-    assert(letters.len() == 5, Errors::BAD_LENGTH);
+    assert(letters.len() == WORD_LENGTH.into(), Errors::BAD_LENGTH);
     let l0 = *letters.at(0);
     let l1 = *letters.at(1);
     let l2 = *letters.at(2);
     let l3 = *letters.at(3);
     let l4 = *letters.at(4);
-    assert(l0 < 26 && l1 < 26 && l2 < 26 && l3 < 26 && l4 < 26, Errors::BAD_LETTER);
+    assert(
+        l0 < ALPHABET_SIZE
+            && l1 < ALPHABET_SIZE
+            && l2 < ALPHABET_SIZE
+            && l3 < ALPHABET_SIZE
+            && l4 < ALPHABET_SIZE,
+        Errors::BAD_LETTER,
+    );
     pack_word(l0, l1, l2, l3, l4)
 }
 

@@ -35,6 +35,14 @@ MANIFEST="$ROOT/manifest_sepolia.json"
 DOJO_CONFIG="$ROOT/dojo_sepolia.toml"
 CLIENT_ENV="$ROOT/client/.env.sepolia"
 DEFAULT_RPC="https://api.cartridge.gg/x/starknet/sepolia"
+DOJO_CONFIG_BAK="$ROOT/.dojo_sepolia.toml.bak.$$"
+
+restore_dojo_config() {
+  if [[ -f "$DOJO_CONFIG_BAK" ]]; then
+    mv "$DOJO_CONFIG_BAK" "$DOJO_CONFIG"
+  fi
+}
+trap restore_dojo_config EXIT
 
 # --- ANSI helpers --------------------------------------------------------
 GREEN='\033[0;32m'
@@ -72,6 +80,14 @@ info "Profile:  $PROFILE"
 info "RPC:      $RPC_URL"
 info "Account:  $DEPLOYER_ADDRESS"
 echo "============================================"
+
+# Keep the profile free of account-specific deployer state. The actions
+# creator metadata and setup dictionary admin must both match this deployer.
+cp "$DOJO_CONFIG" "$DOJO_CONFIG_BAK"
+DEPLOYER_ADDRESS="$DEPLOYER_ADDRESS" perl -0pi -e \
+  's/("zordle_0_1-actions"\s*=\s*\[\s*)"[^\"]+"/$1"$ENV{DEPLOYER_ADDRESS}"/s;
+   s/("zordle_0_1-setup"\s*=\s*\[\s*)"[^\"]+"/$1"$ENV{DEPLOYER_ADDRESS}"/s' \
+  "$DOJO_CONFIG"
 
 # --- 1. Build ------------------------------------------------------------
 
@@ -134,12 +150,19 @@ cat > "$CLIENT_ENV" <<EOF
 # deployer's credentials never reach the client. This file is committed
 # so contributors can run the client against the live world.
 VITE_PUBLIC_NODE_URL=$RPC_URL
+VITE_PUBLIC_NODE_URL_NFT=$RPC_URL
 VITE_PUBLIC_NAMESPACE=zordle_0_1
+VITE_PUBLIC_NAMESPACE_NFT=zordle_0_1
 VITE_PUBLIC_SLOT=zordle-sepolia
+VITE_PUBLIC_SLOT_NFT=zordle-sepolia
+VITE_PUBLIC_CHAIN_ID_NFT=SN_SEPOLIA
 VITE_PUBLIC_WORLD_ADDRESS=$WORLD
 VITE_PUBLIC_ACTIONS_ADDRESS=$ACTIONS
+VITE_PUBLIC_WORLD_ADDRESS_NFT=$WORLD
+VITE_PUBLIC_ACTIONS_ADDRESS_NFT=$ACTIONS
 VITE_PUBLIC_DENSHOKAN_ADDRESS=0x0004e6e5bbf18424dfb825f1dbb65e10473b4603a1ec7b9ab02c143d877114f9
 VITE_PUBLIC_VRF_ADDRESS=0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f
+VITE_PUBLIC_VRF_ADDRESS_NFT=0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f
 EOF
 
 if [[ ! -d "$ROOT/scripts/node_modules" ]]; then

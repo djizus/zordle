@@ -2,7 +2,8 @@
 // through the read-only RpcProvider so they work regardless of whether
 // the user has connected a Controller account yet.
 
-import { CallData, RpcProvider } from "starknet";
+import { CallData } from "starknet";
+import { providerForNetwork, type ZordleNetwork } from "../networkConfig";
 import {
   decodeDictionary,
   decodeGame,
@@ -12,38 +13,44 @@ import {
   type Guess,
 } from "./state";
 
-const ACTIONS_ADDRESS = import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS as string;
-const RPC_URL =
-  import.meta.env.VITE_PUBLIC_NODE_URL ??
-  "https://api.cartridge.gg/x/starknet/sepolia";
-
-const provider = new RpcProvider({ nodeUrl: RPC_URL });
-
-const view = async (entrypoint: string, calldata: any[]): Promise<string[]> =>
-  provider.callContract({
-    contractAddress: ACTIONS_ADDRESS,
+const view = async (
+  network: ZordleNetwork,
+  entrypoint: string,
+  calldata: any[],
+): Promise<string[]> =>
+  providerForNetwork(network).callContract({
+    contractAddress: network.actionsAddress,
     entrypoint,
     calldata: CallData.compile(calldata),
   });
 
-export const getDictionary = async (): Promise<Dictionary> =>
-  decodeDictionary(await view("get_dictionary", []));
+export const getDictionary = async (network: ZordleNetwork): Promise<Dictionary> =>
+  decodeDictionary(await view(network, "get_dictionary", []));
 
-export const getGame = async (tokenId: bigint): Promise<Game> =>
-  decodeGame(await view("get_game", [tokenId]));
+export const getGame = async (
+  network: ZordleNetwork,
+  tokenId: bigint,
+): Promise<Game> => decodeGame(await view(network, "get_game", [tokenId]));
 
-export const getGuess = async (tokenId: bigint, index: number): Promise<Guess> =>
-  decodeGuess(await view("get_guess", [tokenId, index]));
+export const getGuess = async (
+  network: ZordleNetwork,
+  tokenId: bigint,
+  index: number,
+): Promise<Guess> => decodeGuess(await view(network, "get_guess", [tokenId, index]));
 
 export const getCandidateChunk = async (
+  network: ZordleNetwork,
   gameId: bigint,
   index: number,
 ): Promise<bigint> => {
-  const [low, high = "0"] = await view("get_chunk", [gameId, index]);
+  const [low, high = "0"] = await view(network, "get_chunk", [gameId, index]);
   return BigInt(low) + (BigInt(high) << 128n);
 };
 
-export const getDailyGameId = async (player: string): Promise<bigint> => {
-  const [out] = await view("daily_game_id", [player]);
+export const getDailyGameId = async (
+  network: ZordleNetwork,
+  player: string,
+): Promise<bigint> => {
+  const [out] = await view(network, "daily_game_id", [player]);
   return BigInt(out);
 };

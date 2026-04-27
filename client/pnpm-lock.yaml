@@ -48,6 +48,9 @@ importers:
       vite:
         specifier: ^7.0.0
         version: 7.3.2
+      vite-plugin-mkcert:
+        specifier: ^1.17.5
+        version: 1.17.12(vite@7.3.2)
 
 packages:
 
@@ -2143,6 +2146,12 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  vite-plugin-mkcert@1.17.12:
+    resolution: {integrity: sha512-HhLyUZnvkKLuk9o+HBaMlGIa6CqPTfLbVlLFBjrkN4mpZ4saYFRfFx5R12a46UxmzWT9dO8fijmblVvCYvCD3A==}
+    engines: {node: '>=v18.0.0'}
+    peerDependencies:
+      vite: '>=3'
 
   vite@7.3.2:
     resolution: {integrity: sha512-Bby3NOsna2jsjfLVOHKes8sGwgl4TT0E6vvpYgnAYDIF/tie7MRaFthmKuHx1NSXjiTueXH3do80FMQgvEktRg==}
@@ -5362,6 +5371,14 @@ snapshots:
       - bufferutil
       - utf-8-validate
       - zod
+
+  vite-plugin-mkcert@1.17.12(vite@7.3.2):
+    dependencies:
+      debug: 4.4.3
+      picocolors: 1.1.1
+      vite: 7.3.2
+    transitivePeerDependencies:
+      - supports-color
 
   vite@7.3.2:
     dependencies:

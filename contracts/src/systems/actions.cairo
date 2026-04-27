@@ -11,9 +11,6 @@
 //      candidate bitmap, pick a uniform-random non-empty pattern bucket,
 //      narrow. On terminal state (won, or 6th guess), post_action ends the
 //      token's lifecycle so Denshokan/Budokan can settle the score.
-//   4. surrender(token_id): same flow, just reveals one surviving word and
-//      ends the game with `won=false`.
-//
 // Randomness comes from Cartridge VRF on Sepolia/Mainnet (consume_random
 // with a deterministic salt that the client also encoded into a multicall
 // `request_random` preamble). On local katana the contract is initialised
@@ -67,7 +64,7 @@ pub mod actions {
     use openzeppelin_introspection::src5::SRC5Component;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
-    use zordle::constants::{CHUNK_BITS, MAX_GUESSES, NUM_CHUNKS};
+    use zordle::constants::{CHUNK_BITS, DEFAULT_NS, MAX_GUESSES, NUM_CHUNKS};
     use zordle::helpers::bitmap::{
         Bitmap, append_pattern_to_stream, kth_set_bit_u256, read_pattern_from_stream,
     };
@@ -164,7 +161,7 @@ pub mod actions {
     #[abi(embed_v0)]
     impl GameTokenDataImpl of IMinigameTokenData<ContractState> {
         fn score(self: @ContractState, token_id: felt252) -> u64 {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             let game: Game = StoreTrait::new(world).game(token_id);
             if game.mode == MODE_NFT && game.won && game.guesses_used <= MAX_GUESSES {
                 let score: u8 = (MAX_GUESSES + 1) - game.guesses_used;
@@ -175,7 +172,7 @@ pub mod actions {
         }
 
         fn game_over(self: @ContractState, token_id: felt252) -> bool {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             let game: Game = StoreTrait::new(world).game(token_id);
             game.mode == MODE_NFT && game.ended_at != 0
         }
@@ -219,7 +216,9 @@ pub mod actions {
                 let live: u32 = answer_count.into() - first_id;
                 TwoPower::pow(live.try_into().unwrap()) - 1
             };
-            store.set_candidate(@CandidateChunkTrait::new(game_id, i, bits));
+            if bits != 0 {
+                store.set_candidate(@CandidateChunkTrait::new(game_id, i, bits));
+            }
             i += 1;
         }
     }
@@ -228,10 +227,14 @@ pub mod actions {
         poseidon_hash_span([player.into(), day.into()].span())
     }
 
+    fn compute_daily_seed(day: u64) -> felt252 {
+        poseidon_hash_span([day.into(), 'ZORDLE_DAILY'].span())
+    }
+
     #[abi(embed_v0)]
     impl ActionsImpl of super::IActions<ContractState> {
         fn start_daily(ref self: ContractState) -> felt252 {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             let mut store = StoreTrait::new(world);
 
             let dict = store.dictionary();
@@ -252,7 +255,7 @@ pub mod actions {
         }
 
         fn start_game(ref self: ContractState, token_id: felt252) {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             let mut store = StoreTrait::new(world);
 
             let dict = store.dictionary();
@@ -275,7 +278,7 @@ pub mod actions {
         }
 
         fn guess(ref self: ContractState, game_id: felt252, word_id: u16) {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             let mut store = StoreTrait::new(world);
 
             let mut game = store.game(game_id);
@@ -359,7 +362,7 @@ pub mod actions {
             let bucket_count: u32 = Bitmap::popcount(pattern_seen).into();
             assert(bucket_count > 0, Errors::NO_CANDIDATES);
             // Salt depends on mode:
-            //   - Daily (mode 0): salt = poseidon(day, turn, word_id) so
+            //   - Daily (mode 0): salt = poseidon(daily_seed, turn, word_id) so
             //     every account playing today shares the same lazy-boss
             //     tree. Only one daily game per account per day.
             //   - NFT (mode 1):   salt = poseidon(token_id, turn, word_id)
@@ -372,12 +375,17 @@ pub mod actions {
                 )
             } else {
                 let day: u64 = get_block_timestamp() / 86400;
+                let daily_seed = compute_daily_seed(day);
                 poseidon_hash_span(
-                    [day.into(), game.guesses_used.into(), word_id.into()].span(),
+                    [daily_seed, game.guesses_used.into(), word_id.into()].span(),
                 )
             };
             let vrf_addr = self.vrf_address.read();
-            let mix = random_from(vrf_addr, salt);
+            let mix = if vrf_addr.is_zero() {
+                salt
+            } else {
+                random_from(vrf_addr, salt)
+            };
             let mix_u256: u256 = mix.into();
             let k: u32 = (mix_u256 % bucket_count.into()).try_into().unwrap();
             let chosen_pattern: u8 = kth_set_bit_u256(pattern_seen, k);
@@ -409,8 +417,11 @@ pub mod actions {
                     bits = bits / 2;
                     bit_idx += 1;
                 }
-                store
-                    .set_candidate(@CandidateChunkTrait::new(game_id, chunk_index, new_bits));
+                let old_bits = *chunks.at(chunk_index.into());
+                if new_bits != old_bits {
+                    store
+                        .set_candidate(@CandidateChunkTrait::new(game_id, chunk_index, new_bits));
+                }
                 chunk_index += 1;
             }
             // Catches drift if Pass 1 / Pass 2 diverge in iteration order.
@@ -464,27 +475,27 @@ pub mod actions {
     #[abi(embed_v0)]
     impl ActionsViewImpl of super::IActionsView<ContractState> {
         fn get_game(self: @ContractState, game_id: felt252) -> Game {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             StoreTrait::new(world).game(game_id)
         }
 
         fn get_chunk(self: @ContractState, game_id: felt252, index: u8) -> u256 {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             StoreTrait::new(world).candidate(game_id, index).bits
         }
 
         fn get_guess(self: @ContractState, game_id: felt252, index: u8) -> Guess {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             StoreTrait::new(world).guess(game_id, index)
         }
 
         fn get_word(self: @ContractState, word_id: u16) -> u32 {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             StoreTrait::new(world).word_letters(word_id)
         }
 
         fn get_dictionary(self: @ContractState) -> zordle::models::index::Dictionary {
-            let world: WorldStorage = self.world(@"zordle_0_1");
+            let world: WorldStorage = self.world(@DEFAULT_NS());
             StoreTrait::new(world).dictionary()
         }
 

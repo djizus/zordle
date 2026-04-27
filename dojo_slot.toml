@@ -1,0 +1,24 @@
+[world]
+name = "Zordle Daily"
+description = "Loginless daily Zordle practice slot"
+seed = "zordle_daily_slot_v1"
+
+[namespace]
+default = "zordle_0_1"
+
+[writers]
+"zordle_0_1" = ["zordle_0_1-actions", "zordle_0_1-setup"]
+
+[env]
+rpc_url = "https://api.cartridge.gg/x/zordle-daily-slot/katana"
+
+[init_call_args]
+# scripts/deploy_slot.sh replaces this with SLOT_ACCOUNT_ADDRESS before
+# running `sozo migrate`, then restores the checked-in file.
+"zordle_0_1-actions" = [
+    "0x0",
+    "0x0",
+    "0x1",
+    "0x0",
+]
+"zordle_0_1-setup" = ["0x0"]

@@ -1,26 +1,20 @@
-// Multicall builders for the Cartridge Controller account. Each game-state
-// mutation (start_game, guess, surrender) is paired with a VRF
-// `request_random` preamble so the contract's consume_random call inside
-// the same tx can resolve.
+// Contract call builders. VRF preambles are included only for deployments
+// configured with a non-zero VRF address.
 
 import { CallData, hash, type AccountInterface, type Call } from "starknet";
-
-const ACTIONS_ADDRESS = import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS as string;
-const VRF_ADDRESS =
-  (import.meta.env.VITE_PUBLIC_VRF_ADDRESS as string) ??
-  "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f";
-
-if (!ACTIONS_ADDRESS) {
-  throw new Error("VITE_PUBLIC_ACTIONS_ADDRESS missing — run deploy_sepolia.sh");
-}
+import { isZeroAddress, type ZordleNetwork } from "../networkConfig";
 
 // Source variant: 0 = Source::Nonce(addr), 1 = Source::Salt(felt).
 // We always use Salt so the salt can be reproduced contract-side from
 // (token_id, guesses_used, word_id).
 const SOURCE_SALT_VARIANT = 1;
 
-const buildVrfRequestCall = (caller: string, salt: bigint): Call => ({
-  contractAddress: VRF_ADDRESS,
+const buildVrfRequestCall = (
+  network: ZordleNetwork,
+  caller: string,
+  salt: bigint,
+): Call => ({
+  contractAddress: network.vrfAddress,
   entrypoint: "request_random",
   calldata: CallData.compile({
     caller,
@@ -31,10 +25,10 @@ const buildVrfRequestCall = (caller: string, salt: bigint): Call => ({
 // Mint a Denshokan token whose game is our actions contract. Returns a
 // receipt tx_hash; the caller is expected to fish out the new token_id
 // from the events. The MinigameComponent embeds `mint_game` in our contract.
-export const mintGame = async (account: AccountInterface) => {
+export const mintGame = async (network: ZordleNetwork, account: AccountInterface) => {
   return account.execute([
     {
-      contractAddress: ACTIONS_ADDRESS,
+      contractAddress: network.actionsAddress,
       entrypoint: "mint_game",
       // game_components_embeddable_game_standard's minigame::mint_game
       // expects an Option-heavy struct — we pass all None for v1.
@@ -63,11 +57,20 @@ export const mintGame = async (account: AccountInterface) => {
 // reverts, retry — the next block's day matches the new salt.
 const SECONDS_PER_DAY = 86_400n;
 const computeDay = (): bigint => BigInt(Math.floor(Date.now() / 1000)) / SECONDS_PER_DAY;
+const DAILY_DOMAIN = BigInt("0x5a4f52444c455f4441494c59"); // 'ZORDLE_DAILY'
+
+const dailySeed = (): bigint =>
+  BigInt(
+    hash.computePoseidonHashOnElements([
+      computeDay(),
+      DAILY_DOMAIN,
+    ]),
+  );
 
 const dailySalt = (guessesUsed: number, wordId: number): bigint =>
   BigInt(
     hash.computePoseidonHashOnElements([
-      computeDay(),
+      dailySeed(),
       BigInt(guessesUsed),
       BigInt(wordId),
     ]),
@@ -85,19 +88,23 @@ const nftSalt = (tokenId: bigint, guessesUsed: number, wordId: number): bigint =
 // Daily-mode start: no token, contract derives game_id internally and
 // returns it. We refetch via daily_game_id view rather than parsing the tx
 // return value (Cartridge Controller doesn't surface return values cleanly).
-export const startDaily = async (account: AccountInterface) =>
+export const startDaily = async (network: ZordleNetwork, account: AccountInterface) =>
   account.execute([
     {
-      contractAddress: ACTIONS_ADDRESS,
+      contractAddress: network.actionsAddress,
       entrypoint: "start_daily",
       calldata: [],
     },
   ]);
 
-export const startNftGame = async (account: AccountInterface, tokenId: bigint) =>
+export const startNftGame = async (
+  network: ZordleNetwork,
+  account: AccountInterface,
+  tokenId: bigint,
+) =>
   account.execute([
     {
-      contractAddress: ACTIONS_ADDRESS,
+      contractAddress: network.actionsAddress,
       entrypoint: "start_game",
       calldata: CallData.compile([tokenId]),
     },
@@ -107,6 +114,7 @@ export const startNftGame = async (account: AccountInterface, tokenId: bigint) =
 // daily salt; non-null for NFT — we use the per-token salt. game_id is
 // passed verbatim to the contract (it stored the mode at start time).
 export const submitGuess = async (
+  network: ZordleNetwork,
   account: AccountInterface,
   gameId: bigint,
   tokenId: bigint | null,
@@ -117,12 +125,17 @@ export const submitGuess = async (
     tokenId === null
       ? dailySalt(guessesUsed, wordId)
       : nftSalt(tokenId, guessesUsed, wordId);
-  return account.execute([
-    buildVrfRequestCall(ACTIONS_ADDRESS, salt),
+  const calls: Call[] = [
     {
-      contractAddress: ACTIONS_ADDRESS,
+      contractAddress: network.actionsAddress,
       entrypoint: "guess",
       calldata: CallData.compile([gameId, wordId]),
     },
-  ]);
+  ];
+
+  if (!isZeroAddress(network.vrfAddress)) {
+    calls.unshift(buildVrfRequestCall(network, network.actionsAddress, salt));
+  }
+
+  return account.execute(calls);
 };

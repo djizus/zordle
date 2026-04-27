@@ -19,7 +19,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useAccount,
-  useConnect,
   useDisconnect,
 } from "@starknet-react/core";
 import { num } from "starknet";
@@ -28,16 +27,16 @@ import { decodePattern, type Trit } from "./chain/state";
 import {
   getCandidateChunk,
   getDailyGameId,
-  getDictionary,
   getGame,
   getGuess,
 } from "./chain/views";
 import {
-  mintGame,
   startDaily,
   startNftGame,
   submitGuess,
 } from "./chain/contractSystems";
+import { useGameAccount } from "./gameAccount";
+import { networkForMode, type ZordleNetwork } from "./networkConfig";
 
 // ---------- types ---------------------------------------------------------
 
@@ -51,6 +50,12 @@ type Phase = "loading" | "playing" | "ending";
 type PastGuess = {
   word: string;
   pattern: number;
+};
+
+type Toast = {
+  id: number;
+  message: string;
+  kind: "error" | "info";
 };
 
 const CANDIDATE_CHUNKS = 10;
@@ -111,30 +116,32 @@ const letterStatus = (past: PastGuess[]): Map<string, Trit> => {
   return map;
 };
 
-const TRANSFER_SELECTOR = num.toBigInt(
-  "0x99cd8bde557814842a3121e8ddfd433a539b8c9f14bf31ebf108d12e6196e9",
-);
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
-// Pull the freshly-minted token_id out of the mint_game receipt by finding
-// the ERC721 Transfer(0x0, our address, token_id) event.
-const extractTokenIdFromReceipt = (
-  receipt: any,
-  ownerAddress: string,
-): bigint | null => {
-  const events: Array<{ keys?: string[]; data?: string[] }> = receipt?.events ?? [];
-  const ownerNorm = num.toBigInt(ownerAddress);
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const e = events[i];
-    if (!e.keys || e.keys.length < 4) continue;
-    if (num.toBigInt(e.keys[0]) !== TRANSFER_SELECTOR) continue;
-    const to = num.toBigInt(e.keys[2]);
-    if (to !== ownerNorm) continue;
-    const low = num.toBigInt(e.keys[3]);
-    const high = e.keys[4] ? num.toBigInt(e.keys[4]) : 0n;
-    return low + (high << 128n);
-  }
-  return null;
-};
+function ToastStack({
+  toasts,
+  onDismiss,
+}: {
+  toasts: Toast[];
+  onDismiss: (id: number) => void;
+}) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="toast-stack" role="status" aria-live="polite">
+      {toasts.map((toast) => (
+        <button
+          key={toast.id}
+          className={`toast ${toast.kind}`}
+          onClick={() => onDismiss(toast.id)}
+          type="button"
+        >
+          {toast.message}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // ---------- splash demo ---------------------------------------------------
 
@@ -264,22 +271,28 @@ function Board({
           preserveAspectRatio="none"
           aria-hidden="true"
         >
-          <rect
-            x={0}
-            y={0}
-            width={100}
-            height={100}
-            pathLength={100}
+          <path
+            d="M 3 3 H 97 V 97 H 3 Z"
+            pathLength="100"
             fill="none"
             stroke="var(--accent)"
             strokeWidth={2}
             strokeLinecap="round"
-            strokeDasharray="18 82"
+            strokeDasharray="32 68"
             vectorEffect="non-scaling-stroke"
           />
         </svg>
       </div>
     </>
+  );
+}
+
+function LoadingState({ message }: { message: React.ReactNode }) {
+  return (
+    <section className="loading-state" aria-live="polite">
+      <div className="spinner" aria-hidden="true"></div>
+      <p className="boot-loading">{message}</p>
+    </section>
   );
 }
 
@@ -405,14 +418,21 @@ const navigate = (route: Route) => {
 };
 
 export default function App() {
-  const { account, address, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
+  const { address, isConnected } = useAccount();
   const { disconnect } = useDisconnect();
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const handleConnect = useCallback(() => {
-    const ctrl = connectors.find((c) => c.id === "controller") ?? connectors[0];
-    if (ctrl) connect({ connector: ctrl });
-  }, [connect, connectors]);
+  const pushToast = useCallback((message: string, kind: Toast["kind"] = "error") => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((items) => [...items.slice(-2), { id, message, kind }]);
+    window.setTimeout(() => {
+      setToasts((items) => items.filter((item) => item.id !== id));
+    }, 5200);
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((items) => items.filter((item) => item.id !== id));
+  }, []);
 
   // Route from URL.
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
@@ -440,12 +460,9 @@ export default function App() {
         if (cancelled) return;
         setWords(list);
         setWordIndex(new Map(list.map((w, i) => [w, i])));
-        const dict = await getDictionary();
-        if (cancelled) return;
-        if (!dict.loaded) return;
         setBootPhase("ready");
       } catch {
-        // Stay on loading; user sees "syncing chain".
+        // Stay on loading; user sees "loading".
       }
     })();
     return () => {
@@ -457,7 +474,8 @@ export default function App() {
     return (
       <>
         <Header />
-        <p className="boot-loading">syncing chain</p>
+        <ToastStack toasts={toasts} onDismiss={dismissToast} />
+        <p className="boot-loading">loading</p>
       </>
     );
   }
@@ -467,38 +485,30 @@ export default function App() {
       <Splash
         isConnected={!!isConnected}
         address={address}
-        onConnect={handleConnect}
         onDisconnect={() => disconnect()}
+        toasts={toasts}
+        onDismissToast={dismissToast}
         onPlayDaily={() => navigate({ kind: "play", mode: "daily" })}
-        onMintNft={async () => {
-          if (!account || !address) return;
-          // Mint then navigate. The Play screen will pick up where we left.
-          try {
-            const tx = await mintGame(account);
-            const r: any = await account.waitForTransaction(tx.transaction_hash);
-            const newId = extractTokenIdFromReceipt(r, address);
-            if (newId === null) throw new Error("token_id missing in mint receipt");
-            navigate({ kind: "play", mode: "nft", tokenId: newId });
-          } catch (err) {
-            // Surface to console; splash stays put.
-            console.error("[zordle] mint failed", err);
-          }
-        }}
       />
     );
   }
 
   // Play route.
+  const playNetwork = networkForMode(route.mode);
   return (
     <Play
-      key={route.mode === "nft" ? `nft-${route.tokenId.toString()}` : "daily"}
+      key={
+        route.mode === "nft"
+          ? `nft-${playNetwork.chainId}-${playNetwork.actionsAddress}-${route.tokenId.toString()}`
+          : `daily-${playNetwork.chainId}-${playNetwork.actionsAddress}`
+      }
       route={route}
-      account={account ?? null}
-      address={address ?? null}
-      isConnected={!!isConnected}
-      onConnect={handleConnect}
+      network={playNetwork}
       words={words}
       wordIndex={wordIndex}
+      onToast={pushToast}
+      toasts={toasts}
+      onDismissToast={dismissToast}
       onPlayAgain={() => navigate({ kind: "splash" })}
     />
   );
@@ -509,47 +519,29 @@ export default function App() {
 function Splash({
   isConnected,
   address,
-  onConnect,
   onDisconnect,
+  toasts,
+  onDismissToast,
   onPlayDaily,
-  onMintNft,
 }: {
   isConnected: boolean;
   address?: string;
-  onConnect: () => void;
   onDisconnect: () => void;
+  toasts: Toast[];
+  onDismissToast: (id: number) => void;
   onPlayDaily: () => void;
-  onMintNft: () => void;
 }) {
-  const [minting, setMinting] = useState(false);
   return (
     <>
       <Header />
+      <ToastStack toasts={toasts} onDismiss={onDismissToast} />
       <section className="splash">
         <SplashDemo />
-        {!isConnected ? (
-          <button className="btn-primary" onClick={onConnect}>
-            Connect wallet
-          </button>
-        ) : (
+        <button className="btn-primary" onClick={onPlayDaily}>
+          Daily challenge
+        </button>
+        {isConnected && (
           <>
-            <button className="btn-primary" onClick={onPlayDaily} disabled={minting}>
-              Daily challenge
-            </button>
-            <button
-              className="btn-ghost"
-              onClick={async () => {
-                setMinting(true);
-                try {
-                  await onMintNft();
-                } finally {
-                  setMinting(false);
-                }
-              }}
-              disabled={minting}
-            >
-              {minting ? "Minting…" : "Mint & play"}
-            </button>
             <p className="splash-meta">
               connected ·{" "}
               <span className="accent">
@@ -586,23 +578,27 @@ function Splash({
 
 function Play({
   route,
-  account,
-  address,
-  isConnected,
-  onConnect,
+  network,
   words,
   wordIndex,
+  onToast,
+  toasts,
+  onDismissToast,
   onPlayAgain,
 }: {
   route: { kind: "play"; mode: "daily" } | { kind: "play"; mode: "nft"; tokenId: bigint };
-  account: any | null;
-  address: string | null;
-  isConnected: boolean;
-  onConnect: () => void;
+  network: ZordleNetwork;
   words: string[];
   wordIndex: Map<string, number>;
+  onToast: (message: string, kind?: Toast["kind"]) => void;
+  toasts: Toast[];
+  onDismissToast: (id: number) => void;
   onPlayAgain: () => void;
 }) {
+  const { account, address, error, isConnected, isReady, isPending, login } = useGameAccount(
+    route.mode,
+    network,
+  );
   const [phase, setPhase] = useState<Phase>("loading");
   const [gameId, setGameId] = useState<bigint | null>(null);
   const [past, setPast] = useState<PastGuess[]>([]);
@@ -618,8 +614,14 @@ function Play({
 
   // Resolve the on-chain game_id for this route + start it if needed.
   useEffect(() => {
-    if (!isConnected || !account || !address) {
-      setMessage("connect wallet to play");
+    if (error) {
+      onToast(error.message);
+      setMessage("loading");
+      setPhase("loading");
+      return;
+    }
+    if (!isReady || !account || !address) {
+      setMessage(route.mode === "daily" ? "loading" : "connect wallet to play");
       setPhase("loading");
       return;
     }
@@ -630,13 +632,13 @@ function Play({
         if (route.mode === "nft") {
           id = route.tokenId;
         } else {
-          id = await getDailyGameId(address);
+          id = await getDailyGameId(network, address);
         }
         if (cancelled) return;
         setGameId(id);
 
         // Fetch existing game state.
-        const game = await getGame(id);
+        const game = await getGame(network, id);
         if (cancelled) return;
 
         if (game.startedAt === 0n) {
@@ -647,13 +649,13 @@ function Play({
           try {
             const tx =
               route.mode === "nft"
-                ? await startNftGame(account, route.tokenId)
-                : await startDaily(account);
+                ? await startNftGame(network, account, route.tokenId)
+                : await startDaily(network, account);
             await account.waitForTransaction(tx.transaction_hash);
             await refresh(id);
             setMessage(<>guess <span className="accent">1</span> of 6</>);
           } catch (err) {
-            setMessage(`error: ${(err as Error).message}`);
+            onToast(errorMessage(err));
           } finally {
             if (!cancelled) setTxPending(false);
           }
@@ -663,7 +665,7 @@ function Play({
         // Already started — load past guesses.
         const pastGuesses: PastGuess[] = [];
         for (let i = 0; i < game.guessesUsed; i += 1) {
-          const g = await getGuess(id, i);
+          const g = await getGuess(network, id, i);
           pastGuesses.push({
             word: words[g.wordId] ?? "?????",
             pattern: g.pattern,
@@ -681,19 +683,30 @@ function Play({
           setPhase("playing");
         }
       } catch (err) {
-        if (!cancelled) setMessage(`error: ${(err as Error).message}`);
+        if (!cancelled) onToast(errorMessage(err));
       }
     })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, address, route.mode, tokenId?.toString(), words.length]);
+  }, [
+    isReady,
+    address,
+    route.mode,
+    tokenId?.toString(),
+    words.length,
+    network.rpcUrl,
+    network.actionsAddress,
+    account,
+    error,
+    onToast,
+  ]);
 
   const refresh = async (id: bigint) => {
     const out: string[] = [];
     for (let chunk = 0; chunk < CANDIDATE_CHUNKS; chunk += 1) {
-      let bits = await getCandidateChunk(id, chunk);
+      let bits = await getCandidateChunk(network, id, chunk);
       let bit = 0;
       while (bits > 0n) {
         if ((bits & 1n) === 1n) {
@@ -710,12 +723,12 @@ function Play({
 
   const handleSubmit = useCallback(async () => {
     if (!account || !gameId || active.length !== 5) {
-      if (active.length !== 5) setMessage("need 5 letters");
+      if (active.length !== 5) onToast("need 5 letters", "info");
       return;
     }
     const wid = wordIndex.get(active.toLowerCase());
     if (wid === undefined) {
-      setMessage(`"${active.toUpperCase()}" not in dictionary`);
+      onToast(`"${active.toUpperCase()}" not in dictionary`);
       return;
     }
     const submitted = active;
@@ -723,10 +736,10 @@ function Play({
     setMessage(<>guess <span className="accent">{guessesUsed + 1}</span> of 6 · processing<span className="dots"></span></>);
     setTxPending(true);
     try {
-      const tx = await submitGuess(account, gameId, tokenId, guessesUsed, wid);
+      const tx = await submitGuess(network, account, gameId, tokenId, guessesUsed, wid);
       await account.waitForTransaction(tx.transaction_hash);
-      const g = await getGuess(gameId, guessesUsed);
-      const game = await getGame(gameId);
+      const g = await getGuess(network, gameId, guessesUsed);
+      const game = await getGame(network, gameId);
       const newPast = [...past, { word: submitted, pattern: g.pattern }];
       setPast(newPast);
       setActive("");
@@ -740,12 +753,12 @@ function Play({
         await refresh(gameId);
       }
     } catch (err) {
-      setMessage(`error: ${(err as Error).message}`);
+      onToast(errorMessage(err));
     } finally {
       setTxPending(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account, gameId, tokenId, active, past, wordIndex, words]);
+  }, [account, gameId, tokenId, active, past, wordIndex, words, network, onToast]);
 
   const handleKey = useCallback(
     (key: string) => {
@@ -799,19 +812,20 @@ function Play({
     const text = [`zordle ${score}`, rows, link].join("\n");
     try {
       await navigator.clipboard.writeText(text);
-      setMessage("copied result");
+      onToast("copied result", "info");
     } catch {
-      setMessage("share failed");
+      onToast("share failed");
     }
-  }, [won, past, route]);
+  }, [won, past, route, onToast]);
 
-  if (!isConnected) {
+  if (route.mode === "nft" && !isConnected) {
     return (
       <>
         <Header />
+        <ToastStack toasts={toasts} onDismiss={onDismissToast} />
         <section className="splash">
           <p className="splash-meta">connect to continue</p>
-          <button className="btn-primary" onClick={onConnect}>
+          <button className="btn-primary" onClick={login}>
             Connect wallet
           </button>
         </section>
@@ -819,11 +833,24 @@ function Play({
     );
   }
 
-  if (phase === "loading") {
+  if (error) {
     return (
       <>
         <Header />
-        <p className="boot-loading">{message}</p>
+        <ToastStack toasts={toasts} onDismiss={onDismissToast} />
+        <section className="splash">
+          <p className="splash-meta">daily is unavailable</p>
+        </section>
+      </>
+    );
+  }
+
+  if (phase === "loading" || isPending) {
+    return (
+      <>
+        <Header />
+        <ToastStack toasts={toasts} onDismiss={onDismissToast} />
+        <LoadingState message={message} />
       </>
     );
   }
@@ -832,6 +859,7 @@ function Play({
     return (
       <>
         <Header />
+        <ToastStack toasts={toasts} onDismiss={onDismissToast} />
         <Board
           past={past}
           active={active}
@@ -850,6 +878,7 @@ function Play({
   return (
     <>
       <Header />
+      <ToastStack toasts={toasts} onDismiss={onDismissToast} />
       <Board
         past={past}
         active=""

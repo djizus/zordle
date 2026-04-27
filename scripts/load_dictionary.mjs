@@ -71,7 +71,7 @@ console.log(
   `answer pool : ${ANSWER_COUNT.toString().padStart(6)} from ${ANSWER_FILE}`,
 );
 console.log(
-  `guess-only  : ${guessOnlyDeduped.toString().padStart(6).length}` +
+  `guess-only  : ${guessOnlyDeduped.length.toString().padStart(6)}` +
     ` (read ${guessOnly.length}, deduped ${guessOnly.length - guessOnlyDeduped.length})`,
 );
 console.log(`total       : ${TOTAL.toString().padStart(6)}`);

@@ -6,9 +6,9 @@ export type Game = {
   startedAt: bigint;
   endedAt: bigint;
   guessesUsed: number;
-  seed: bigint;
   won: boolean;
   finalWordId: number;
+  mode: number;
 };
 
 export type Guess = {
@@ -37,9 +37,9 @@ export function decodeGame(felts: string[]): Game {
     startedAt: big(felts[2]),
     endedAt: big(felts[3]),
     guessesUsed: num(felts[4]),
-    seed: big(felts[5]),
-    won: bool(felts[6]),
-    finalWordId: num(felts[7]),
+    won: bool(felts[5]),
+    finalWordId: num(felts[6]),
+    mode: num(felts[7]),
   };
 }
 

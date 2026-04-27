@@ -14,6 +14,7 @@ pub const PATTERN_COUNT: u32 = 243;
 // and are never iterated during the lazy-boss bucketing pass.
 pub const NUM_CHUNKS: u8 = 10;
 pub const CHUNK_BITS: u32 = 256;
+pub const MAX_ANSWER_COUNT: u32 = NUM_CHUNKS.into() * CHUNK_BITS;
 
 // Dictionary singleton key.
 pub const DICTIONARY_ID: u8 = 0;
@@ -21,3 +22,8 @@ pub const DICTIONARY_ID: u8 = 0;
 // Letter packing: 5 bits per letter (a-z fits in 0..25), 5 letters per word.
 pub const LETTER_BITS: u32 = 5;
 pub const ALPHABET_SIZE: u8 = 26;
+
+// Dojo namespace. Keep this in sync with dojo_*.toml.
+pub fn DEFAULT_NS() -> ByteArray {
+    "zordle_0_1"
+}
