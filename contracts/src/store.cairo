@@ -3,7 +3,8 @@
 use dojo::model::ModelStorage;
 use dojo::world::WorldStorage;
 use crate::helpers::power::TwoPower;
-use crate::models::index::{CandidateChunk, Dictionary, Game, Guess, WordPack};
+use starknet::ContractAddress;
+use crate::models::index::{ActiveGame, CandidateChunk, Dictionary, Game, Guess, WordPack};
 
 #[derive(Copy, Drop)]
 pub struct Store {
@@ -55,6 +56,16 @@ pub impl StoreImpl of StoreTrait {
     }
 
     fn set_game(mut self: Store, model: @Game) {
+        self.world.write_model(model);
+    }
+
+    // -- ActiveGame ---------------------------------------------------------
+
+    fn active_game(self: @Store, player: ContractAddress) -> ActiveGame {
+        self.world.read_model(player)
+    }
+
+    fn set_active_game(mut self: Store, model: @ActiveGame) {
         self.world.write_model(model);
     }
 

@@ -32,7 +32,7 @@ export const useGameAccount = (
   const provider = useMemo(() => providerForNetwork(network), [network.rpcUrl]);
 
   useEffect(() => {
-    if (mode !== "daily") return;
+    if (mode !== "practice") return;
 
     let cancelled = false;
     setBurnerPending(true);
@@ -54,12 +54,12 @@ export const useGameAccount = (
   }, [mode, provider]);
 
   const login = useCallback(() => {
-    if (mode === "daily") return;
+    if (mode === "practice") return;
     const ctrl = connectors.find((c) => c.id === "controller") ?? connectors[0];
     if (ctrl) connect({ connector: ctrl });
   }, [connect, connectors, mode]);
 
-  if (mode === "daily") {
+  if (mode === "practice") {
     return {
       account: burner,
       address: burner?.address ?? null,

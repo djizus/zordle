@@ -1,6 +1,6 @@
 import { RpcProvider } from "starknet";
 
-export type GameMode = "daily" | "nft";
+export type GameMode = "practice" | "nft";
 
 export type ZordleNetwork = {
   mode: GameMode;
@@ -26,10 +26,10 @@ const nftRpc =
   legacyRpc ??
   "https://api.cartridge.gg/x/starknet/sepolia";
 
-const dailyActions =
-  (env.VITE_PUBLIC_ACTIONS_ADDRESS_DAILY as string | undefined) ?? legacyActions ?? "";
-const dailyRpc =
-  (env.VITE_PUBLIC_NODE_URL_DAILY as string | undefined) ??
+const practiceActions =
+  (env.VITE_PUBLIC_ACTIONS_ADDRESS_PRACTICE as string | undefined) ?? legacyActions ?? "";
+const practiceRpc =
+  (env.VITE_PUBLIC_NODE_URL_PRACTICE as string | undefined) ??
   legacyRpc ??
   "http://localhost:5050";
 
@@ -46,23 +46,22 @@ export const NFT_NETWORK: ZordleNetwork = {
   slot: (env.VITE_PUBLIC_SLOT_NFT as string | undefined) ?? env.VITE_PUBLIC_SLOT,
 };
 
-export const DAILY_NETWORK: ZordleNetwork = {
-  mode: "daily",
-  rpcUrl: dailyRpc,
+export const PRACTICE_NETWORK: ZordleNetwork = {
+  mode: "practice",
+  rpcUrl: practiceRpc,
   chainId:
-    (env.VITE_PUBLIC_CHAIN_ID_DAILY as string | undefined) ?? "WP_ZORDLE_DAILY_SLOT",
-  actionsAddress: dailyActions,
-  vrfAddress: (env.VITE_PUBLIC_VRF_ADDRESS_DAILY as string | undefined) ?? ZERO_ADDRESS,
-  namespace: (env.VITE_PUBLIC_NAMESPACE_DAILY as string | undefined) ?? "zordle_0_1",
-  slot: (env.VITE_PUBLIC_SLOT_DAILY as string | undefined) ?? "zordle-daily-slot",
+    (env.VITE_PUBLIC_CHAIN_ID_PRACTICE as string | undefined) ?? "WP_ZORDLE_PRACTICE_SLOT",
+  actionsAddress: practiceActions,
+  vrfAddress: (env.VITE_PUBLIC_VRF_ADDRESS_PRACTICE as string | undefined) ?? ZERO_ADDRESS,
+  namespace: (env.VITE_PUBLIC_NAMESPACE_PRACTICE as string | undefined) ?? "zordle_0_1",
+  slot: (env.VITE_PUBLIC_SLOT_PRACTICE as string | undefined) ?? "zordle-practice-slot",
 };
 
 export const networkForMode = (mode: GameMode): ZordleNetwork =>
-  mode === "daily" ? DAILY_NETWORK : NFT_NETWORK;
+  mode === "practice" ? PRACTICE_NETWORK : NFT_NETWORK;
 
 export const providerForNetwork = (network: ZordleNetwork) =>
   new RpcProvider({ nodeUrl: network.rpcUrl });
 
 export const isZeroAddress = (address: string | undefined | null): boolean =>
   !address || BigInt(address) === 0n;
-

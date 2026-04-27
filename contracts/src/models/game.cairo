@@ -7,7 +7,7 @@ pub mod Errors {
     pub const NOT_OWNER: felt252 = 'Game: not owner';
 }
 
-pub const MODE_DAILY: u8 = 0;
+pub const MODE_PRACTICE: u8 = 0;
 pub const MODE_NFT: u8 = 1;
 
 #[generate_trait]

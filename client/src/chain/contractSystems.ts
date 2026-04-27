@@ -48,51 +48,26 @@ export const mintGame = async (network: ZordleNetwork, account: AccountInterface
   ]);
 };
 
-// Salt convention mirrors the contract's mode-aware derivation:
-//   - Daily (mode 0): salt = poseidon(day, turn, word_id)
-//   - NFT (mode 1):   salt = poseidon(token_id, turn, word_id)
-// The day approximation uses wall-clock UTC; block timestamps are within
-// a few seconds of UTC, so the only edge case is a guess submitted right
-// at midnight that lands in the next day's block. If consume_random
-// reverts, retry — the next block's day matches the new salt.
-const SECONDS_PER_DAY = 86_400n;
-const computeDay = (): bigint => BigInt(Math.floor(Date.now() / 1000)) / SECONDS_PER_DAY;
-const DAILY_DOMAIN = BigInt("0x5a4f52444c455f4441494c59"); // 'ZORDLE_DAILY'
-
-const dailySeed = (): bigint =>
+// Salt convention mirrors the contract:
+//   salt = poseidon(game_id, turn, word_id)
+// For NFT games, game_id is the token id.
+const gameSalt = (gameId: bigint, guessesUsed: number, wordId: number): bigint =>
   BigInt(
     hash.computePoseidonHashOnElements([
-      computeDay(),
-      DAILY_DOMAIN,
-    ]),
-  );
-
-const dailySalt = (guessesUsed: number, wordId: number): bigint =>
-  BigInt(
-    hash.computePoseidonHashOnElements([
-      dailySeed(),
+      gameId,
       BigInt(guessesUsed),
       BigInt(wordId),
     ]),
   );
 
-const nftSalt = (tokenId: bigint, guessesUsed: number, wordId: number): bigint =>
-  BigInt(
-    hash.computePoseidonHashOnElements([
-      tokenId,
-      BigInt(guessesUsed),
-      BigInt(wordId),
-    ]),
-  );
-
-// Daily-mode start: no token, contract derives game_id internally and
-// returns it. We refetch via daily_game_id view rather than parsing the tx
+// Practice start: no token, contract derives game_id internally and
+// returns it. We refetch via active_game_id view rather than parsing the tx
 // return value (Cartridge Controller doesn't surface return values cleanly).
-export const startDaily = async (network: ZordleNetwork, account: AccountInterface) =>
+export const startPractice = async (network: ZordleNetwork, account: AccountInterface) =>
   account.execute([
     {
       contractAddress: network.actionsAddress,
-      entrypoint: "start_daily",
+      entrypoint: "start_practice",
       calldata: [],
     },
   ]);
@@ -110,9 +85,9 @@ export const startNftGame = async (
     },
   ]);
 
-// One submitGuess for both modes. `tokenId` is null for daily — we use the
-// daily salt; non-null for NFT — we use the per-token salt. game_id is
-// passed verbatim to the contract (it stored the mode at start time).
+// One submitGuess for both modes. game_id is passed verbatim to the contract
+// (it stored the mode at start time). `tokenId` is only used to decide whether
+// the NFT deployment needs a VRF preamble.
 export const submitGuess = async (
   network: ZordleNetwork,
   account: AccountInterface,
@@ -121,10 +96,7 @@ export const submitGuess = async (
   guessesUsed: number,
   wordId: number,
 ) => {
-  const salt =
-    tokenId === null
-      ? dailySalt(guessesUsed, wordId)
-      : nftSalt(tokenId, guessesUsed, wordId);
+  const salt = gameSalt(gameId, guessesUsed, wordId);
   const calls: Call[] = [
     {
       contractAddress: network.actionsAddress,
@@ -133,7 +105,7 @@ export const submitGuess = async (
     },
   ];
 
-  if (!isZeroAddress(network.vrfAddress)) {
+  if (tokenId !== null && !isZeroAddress(network.vrfAddress)) {
     calls.unshift(buildVrfRequestCall(network, network.actionsAddress, salt));
   }
 

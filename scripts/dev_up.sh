@@ -113,17 +113,17 @@ echo "Setup:   $SETUP"
 
 cat > "$ROOT/client/.env.local" <<EOF
 VITE_PUBLIC_NODE_URL=$RPC
-VITE_PUBLIC_NODE_URL_DAILY=$RPC
+VITE_PUBLIC_NODE_URL_PRACTICE=$RPC
 VITE_PUBLIC_NODE_URL_NFT=$RPC
 VITE_PUBLIC_NAMESPACE=zordle_0_1
-VITE_PUBLIC_NAMESPACE_DAILY=zordle_0_1
+VITE_PUBLIC_NAMESPACE_PRACTICE=zordle_0_1
 VITE_PUBLIC_NAMESPACE_NFT=zordle_0_1
-VITE_PUBLIC_CHAIN_ID_DAILY=KATANA
+VITE_PUBLIC_CHAIN_ID_PRACTICE=KATANA
 VITE_PUBLIC_CHAIN_ID_NFT=KATANA
 VITE_PUBLIC_ACTIONS_ADDRESS=$ACTIONS
-VITE_PUBLIC_ACTIONS_ADDRESS_DAILY=$ACTIONS
+VITE_PUBLIC_ACTIONS_ADDRESS_PRACTICE=$ACTIONS
 VITE_PUBLIC_ACTIONS_ADDRESS_NFT=$ACTIONS
-VITE_PUBLIC_VRF_ADDRESS_DAILY=0x0
+VITE_PUBLIC_VRF_ADDRESS_PRACTICE=0x0
 VITE_PUBLIC_VRF_ADDRESS_NFT=0x0
 EOF
 
@@ -133,17 +133,31 @@ mkdir -p "$ROOT/client/public"
 
 # --- 6. install + run loader ---------------------------------------------
 
-if [[ ! -d "$ROOT/scripts/node_modules" ]]; then
-  echo "Installing scripts deps..."
-  (cd "$ROOT/scripts" && pnpm install --silent)
-fi
+# Skip the dictionary load on incremental redeploys — the setup contract
+# rejects re-loading via dict.assert_not_loaded(). Read the `loaded` flag
+# (last felt of the get_dictionary view's struct) and bail early if set.
+is_dict_loaded() {
+  local out last
+  out=$(sozo call --rpc-url "$RPC" "$ACTIONS" get_dictionary 2>/dev/null) || return 1
+  last=$(echo "$out" | tr -d '[]' | awk '{ print $NF }' | sed 's/^0x0x/0x/')
+  [[ "$last" =~ ^0x0*1$ ]]
+}
 
-echo "Loading dictionary..."
-NODE_URL="$RPC" \
-ACCOUNT_ADDRESS="$ACCOUNT" \
-PRIVATE_KEY="$PRIVKEY" \
-SETUP_ADDRESS="$SETUP" \
-  node "$ROOT/scripts/load_dictionary.mjs"
+if is_dict_loaded; then
+  echo "Dictionary already loaded, skipping..."
+else
+  if [[ ! -d "$ROOT/scripts/node_modules" ]]; then
+    echo "Installing scripts deps..."
+    (cd "$ROOT/scripts" && pnpm install --silent)
+  fi
+
+  echo "Loading dictionary..."
+  NODE_URL="$RPC" \
+  ACCOUNT_ADDRESS="$ACCOUNT" \
+  PRIVATE_KEY="$PRIVKEY" \
+  SETUP_ADDRESS="$SETUP" \
+    node "$ROOT/scripts/load_dictionary.mjs"
+fi
 
 echo ""
 echo "Ready. Run:  cd client && pnpm dev"

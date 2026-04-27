@@ -33,11 +33,10 @@ pub struct WordPack {
     pub packed: u256,
 }
 
-// One row per active game. The `id` field is mode-dependent:
-//   - mode = 0 (daily):  id = poseidon(player, day) — one game per
-//                        account per day, no EGC token, salt derived
-//                        from `day` so all today's daily games share
-//                        the same lazy-boss tree.
+// One row per game. The `id` field is mode-dependent:
+//   - mode = 0 (practice): id = poseidon(player, timestamp, tx_hash).
+//                          No EGC token; a player has at most one
+//                          unfinished practice game at a time.
 //   - mode = 1 (NFT):    id = Denshokan token_id — minted via our
 //                        embedded MinigameComponent, salt derived
 //                        from `token_id` so each NFT is its own
@@ -59,6 +58,16 @@ pub struct Game {
     pub won: bool,
     pub final_word_id: u16,
     pub mode: u8,
+}
+
+// Current unfinished practice game for a player. When the referenced game is
+// over, start_practice creates a fresh one and overwrites this row.
+#[derive(Copy, Drop, Serde)]
+#[dojo::model]
+pub struct ActiveGame {
+    #[key]
+    pub player: ContractAddress,
+    pub game_id: felt252,
 }
 
 // Per-game candidate bitmap, sharded across NUM_CHUNKS u256 chunks.

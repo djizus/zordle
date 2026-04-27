@@ -47,10 +47,10 @@ export const getCandidateChunk = async (
   return BigInt(low) + (BigInt(high) << 128n);
 };
 
-export const getDailyGameId = async (
+export const getActiveGameId = async (
   network: ZordleNetwork,
   player: string,
 ): Promise<bigint> => {
-  const [out] = await view(network, "daily_game_id", [player]);
+  const [out] = await view(network, "active_game_id", [player]);
   return BigInt(out);
 };

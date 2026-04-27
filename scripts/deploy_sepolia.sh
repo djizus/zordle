@@ -170,13 +170,27 @@ if [[ ! -d "$ROOT/scripts/node_modules" ]]; then
   (cd "$ROOT/scripts" && pnpm install --silent)
 fi
 
-info "Step 4/4 — loading dictionary onto Sepolia (this can take 15-30 minutes)"
-warn "On Sepolia each tx confirmation is ~30s vs ~1s on katana."
-NODE_URL="$RPC_URL" \
-ACCOUNT_ADDRESS="$DEPLOYER_ADDRESS" \
-PRIVATE_KEY="$DEPLOYER_PRIVATE_KEY" \
-SETUP_ADDRESS="$SETUP" \
-  node "$ROOT/scripts/load_dictionary.mjs"
+# Skip the dictionary load on incremental redeploys — the setup contract
+# rejects re-loading via dict.assert_not_loaded(). Read the `loaded` flag
+# (last felt of the get_dictionary view's struct) and bail early if set.
+is_dict_loaded() {
+  local out last
+  out=$(sozo call -P "$PROFILE" --rpc-url "$RPC_URL" "$ACTIONS" get_dictionary 2>/dev/null) || return 1
+  last=$(echo "$out" | tr -d '[]' | awk '{ print $NF }' | sed 's/^0x0x/0x/')
+  [[ "$last" =~ ^0x0*1$ ]]
+}
+
+if is_dict_loaded; then
+  info "Step 4/4 — dictionary already loaded on Sepolia, skipping"
+else
+  info "Step 4/4 — loading dictionary onto Sepolia (this can take 15-30 minutes)"
+  warn "On Sepolia each tx confirmation is ~30s vs ~1s on katana."
+  NODE_URL="$RPC_URL" \
+  ACCOUNT_ADDRESS="$DEPLOYER_ADDRESS" \
+  PRIVATE_KEY="$DEPLOYER_PRIVATE_KEY" \
+  SETUP_ADDRESS="$SETUP" \
+    node "$ROOT/scripts/load_dictionary.mjs"
+fi
 
 # --- 5. Summary ----------------------------------------------------------
 

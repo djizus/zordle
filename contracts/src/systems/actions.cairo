@@ -11,26 +11,24 @@
 //      candidate bitmap, pick a uniform-random non-empty pattern bucket,
 //      narrow. On terminal state (won, or 6th guess), post_action ends the
 //      token's lifecycle so Denshokan/Budokan can settle the score.
-// Randomness comes from Cartridge VRF on Sepolia/Mainnet (consume_random
+// NFT randomness comes from Cartridge VRF on Sepolia/Mainnet (consume_random
 // with a deterministic salt that the client also encoded into a multicall
-// `request_random` preamble). On local katana the contract is initialised
-// with vrf_address=0 and falls back to a tx-info-derived pseudo-random.
+// `request_random` preamble). Practice mode runs without VRF and uses the
+// same deterministic salt directly.
 
 #[starknet::interface]
 pub trait IActions<T> {
-    /// Mode 0 — daily challenge. No EGC token, no mint cost, capped to
-    /// one game per account per day. game_id is derived deterministically
-    /// from poseidon(player, day) so attempting a second start_daily on
-    /// the same UTC day reverts. Returns the derived game_id so the
-    /// client can use it to query views without recomputing.
-    fn start_daily(ref self: T) -> felt252;
+    /// Mode 0 — free practice. No EGC token, no mint cost. If the caller
+    /// already has an unfinished practice game, returns it; otherwise creates
+    /// a fresh run.
+    fn start_practice(ref self: T) -> felt252;
 
     /// Mode 1 — NFT. Caller must already own the Denshokan token at
     /// `token_id` (mint via the embedded mint_game entrypoint). Each NFT
     /// is a fresh, replayable game.
     fn start_game(ref self: T, token_id: felt252);
 
-    /// Submit a guess. game_id is whatever was returned by start_daily()
+    /// Submit a guess. game_id is whatever was returned by start_practice()
     /// or the token_id passed to start_game(). Salt for VRF consume_random
     /// is derived from the game's mode (read from storage).
     fn guess(ref self: T, game_id: felt252, word_id: u16);
@@ -45,10 +43,8 @@ pub trait IActionsView<T> {
     fn get_guess(self: @T, game_id: felt252, index: u8) -> zordle::models::index::Guess;
     fn get_word(self: @T, word_id: u16) -> u32;
     fn get_dictionary(self: @T) -> zordle::models::index::Dictionary;
-    /// Compute the deterministic daily game_id for `player` for the
-    /// current UTC day. Lets the client query an in-progress daily game
-    /// without having to mirror the salt derivation.
-    fn daily_game_id(self: @T, player: starknet::ContractAddress) -> felt252;
+    /// Return the player's unfinished practice game id, or 0 if none exists.
+    fn active_game_id(self: @T, player: starknet::ContractAddress) -> felt252;
 }
 
 #[dojo::contract]
@@ -63,7 +59,7 @@ pub mod actions {
     use game_components_embeddable_game_standard::minigame::minigame_component::MinigameComponent;
     use openzeppelin_introspection::src5::SRC5Component;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
-    use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_tx_info};
     use zordle::constants::{CHUNK_BITS, DEFAULT_NS, MAX_GUESSES, NUM_CHUNKS};
     use zordle::helpers::bitmap::{
         Bitmap, append_pattern_to_stream, kth_set_bit_u256, read_pattern_from_stream,
@@ -73,8 +69,8 @@ pub mod actions {
     use zordle::helpers::wordle::compute_pattern;
     use zordle::models::candidate::CandidateChunkTrait;
     use zordle::models::dictionary::DictionaryAssert;
-    use zordle::models::game::{GameAssert, GameTrait, MODE_DAILY, MODE_NFT};
-    use zordle::models::index::{Game, Guess};
+    use zordle::models::game::{GameAssert, GameTrait, MODE_NFT, MODE_PRACTICE};
+    use zordle::models::index::{ActiveGame, Game, Guess};
     use zordle::store::{Store, StoreTrait};
 
     component!(path: MinigameComponent, storage: minigame, event: MinigameEvent);
@@ -131,7 +127,7 @@ pub mod actions {
                 .initializer(
                     creator_address,
                     "zordle",
-                    "A new 5-letter word every day. Six guesses to crack it. Same puzzle for everyone - climb the daily leaderboard.",
+                    "A 5-letter word puzzle. Six guesses to crack it. Play free practice runs or compete with NFT-bound games.",
                     "zKorp",
                     "zKorp",
                     "Word Puzzle",
@@ -155,7 +151,7 @@ pub mod actions {
 
     // Score view consumed by Denshokan / Budokan leaderboard. Higher = better.
     //   1/6 win → 6, 2/6 → 5, ..., 6/6 → 1, loss → 0.
-    // Only mode 1 (NFT) games expose a score — daily-mode games (mode 0)
+    // Only mode 1 (NFT) games expose a score — practice-mode games (mode 0)
     // aren't tied to a token, so any token_id query returns 0 by default
     // (Dojo zero-init).
     #[abi(embed_v0)]
@@ -199,7 +195,7 @@ pub mod actions {
     }
 
     // Shared helper: write the per-game candidate bitmap for the answer
-    // pool. Used by both start_daily and start_game.
+    // pool. Used by both start_practice and start_game.
     fn populate_candidate_bitmap(
         ref store: Store, game_id: felt252, answer_count: u16,
     ) {
@@ -223,17 +219,16 @@ pub mod actions {
         }
     }
 
-    fn compute_daily_game_id(player: ContractAddress, day: u64) -> felt252 {
-        poseidon_hash_span([player.into(), day.into()].span())
-    }
-
-    fn compute_daily_seed(day: u64) -> felt252 {
-        poseidon_hash_span([day.into(), 'ZORDLE_DAILY'].span())
+    fn compute_practice_game_id(player: ContractAddress) -> felt252 {
+        let tx_info = get_tx_info().unbox();
+        poseidon_hash_span(
+            [player.into(), get_block_timestamp().into(), tx_info.transaction_hash].span(),
+        )
     }
 
     #[abi(embed_v0)]
     impl ActionsImpl of super::IActions<ContractState> {
-        fn start_daily(ref self: ContractState) -> felt252 {
+        fn start_practice(ref self: ContractState) -> felt252 {
             let world: WorldStorage = self.world(@DEFAULT_NS());
             let mut store = StoreTrait::new(world);
 
@@ -241,14 +236,21 @@ pub mod actions {
             dict.assert_loaded();
 
             let player = get_caller_address();
-            let day = get_block_timestamp() / 86400;
-            let game_id = compute_daily_game_id(player, day);
+            let active = store.active_game(player);
+            if active.game_id != 0 {
+                let active_game = store.game(active.game_id);
+                if active_game.started_at != 0 && active_game.ended_at == 0 {
+                    return active.game_id;
+                }
+            }
 
+            let game_id = compute_practice_game_id(player);
             let existing = store.game(game_id);
             assert(existing.started_at == 0, Errors::ALREADY_STARTED);
 
-            let game = GameTrait::new(game_id, player, MODE_DAILY);
+            let game = GameTrait::new(game_id, player, MODE_PRACTICE);
             store.set_game(@game);
+            store.set_active_game(@ActiveGame { player, game_id });
 
             populate_candidate_bitmap(ref store, game_id, dict.answer_count);
             game_id
@@ -287,9 +289,8 @@ pub mod actions {
             game.assert_owner(get_caller_address());
             assert(game.guesses_used < MAX_GUESSES, Errors::NO_GUESSES_LEFT);
 
-            // Only NFT mode hits the EGC ownership gate; daily mode is
-            // standalone (the start_daily call already enforced "one per
-            // account per day" via game_id derivation).
+            // Only NFT mode hits the EGC ownership gate; practice mode is
+            // standalone and loginless on the slot.
             let token_address = self.token_address();
             let is_nft = game.mode == MODE_NFT;
             if is_nft && !token_address.is_zero() {
@@ -362,24 +363,15 @@ pub mod actions {
             let bucket_count: u32 = Bitmap::popcount(pattern_seen).into();
             assert(bucket_count > 0, Errors::NO_CANDIDATES);
             // Salt depends on mode:
-            //   - Daily (mode 0): salt = poseidon(daily_seed, turn, word_id) so
-            //     every account playing today shares the same lazy-boss
-            //     tree. Only one daily game per account per day.
+            //   - Practice (mode 0): salt = poseidon(game_id, turn, word_id)
+            //     so each free run has its own deterministic lazy-boss tree.
             //   - NFT (mode 1):   salt = poseidon(token_id, turn, word_id)
             //     so each token is its own unique game.
             // The client must encode the SAME salt into its request_random
-            // preamble call or consume_random reverts.
-            let salt: felt252 = if is_nft {
-                poseidon_hash_span(
-                    [game_id, game.guesses_used.into(), word_id.into()].span(),
-                )
-            } else {
-                let day: u64 = get_block_timestamp() / 86400;
-                let daily_seed = compute_daily_seed(day);
-                poseidon_hash_span(
-                    [daily_seed, game.guesses_used.into(), word_id.into()].span(),
-                )
-            };
+            // preamble call when VRF is enabled or consume_random reverts.
+            let salt: felt252 = poseidon_hash_span(
+                [game_id, game.guesses_used.into(), word_id.into()].span(),
+            );
             let vrf_addr = self.vrf_address.read();
             let mix = if vrf_addr.is_zero() {
                 salt
@@ -499,11 +491,22 @@ pub mod actions {
             StoreTrait::new(world).dictionary()
         }
 
-        fn daily_game_id(
+        fn active_game_id(
             self: @ContractState, player: ContractAddress,
         ) -> felt252 {
-            let day = get_block_timestamp() / 86400;
-            compute_daily_game_id(player, day)
+            let world: WorldStorage = self.world(@DEFAULT_NS());
+            let store = StoreTrait::new(world);
+            let active = store.active_game(player);
+            if active.game_id == 0 {
+                return 0;
+            }
+
+            let game = store.game(active.game_id);
+            if game.started_at != 0 && game.ended_at == 0 {
+                active.game_id
+            } else {
+                0
+            }
         }
     }
 }

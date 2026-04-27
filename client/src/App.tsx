@@ -1,16 +1,15 @@
 // React app shell — Cartridge Controller connect + dual-mode Zordle.
 //
 // Modes:
-//   daily : one game per account per day, no EGC token. salt derived
-//           from poseidon(day, turn, word). All accounts on day X share
-//           the same lazy-boss tree.
+//   practice : loginless play on a slot, no EGC token. Unfinished runs
+//              resume; finished runs can be replaced with a fresh run.
 //   nft   : Denshokan token-bound game, replayable per-token. salt
 //           derived from poseidon(token_id, turn, word). Shareable via
 //           a /nft/<id> deep link.
 //
 // Routes:
 //   /             splash — connect + pick a mode
-//   /play         daily challenge for the connected account
+//   /play         loginless practice for the current browser account
 //   /play/<id>    NFT game for the given token_id (hex felt)
 //
 // Phase machine within a route:
@@ -26,12 +25,12 @@ import { num } from "starknet";
 import { decodePattern, type Trit } from "./chain/state";
 import {
   getCandidateChunk,
-  getDailyGameId,
+  getActiveGameId,
   getGame,
   getGuess,
 } from "./chain/views";
 import {
-  startDaily,
+  startPractice,
   startNftGame,
   submitGuess,
 } from "./chain/contractSystems";
@@ -42,7 +41,7 @@ import { networkForMode, type ZordleNetwork } from "./networkConfig";
 
 type Route =
   | { kind: "splash" }
-  | { kind: "play"; mode: "daily" }
+  | { kind: "play"; mode: "practice" }
   | { kind: "play"; mode: "nft"; tokenId: bigint };
 
 type Phase = "loading" | "playing" | "ending";
@@ -72,7 +71,7 @@ const parseRoute = (pathname: string): Route => {
   // Strip trailing slash.
   const path = pathname.replace(/\/$/, "");
   if (path === "" || path === "/") return { kind: "splash" };
-  if (path === "/play") return { kind: "play", mode: "daily" };
+  if (path === "/play") return { kind: "play", mode: "practice" };
   const m = path.match(/^\/play\/(0x[0-9a-fA-F]+|[0-9]+)$/);
   if (m) {
     try {
@@ -86,7 +85,7 @@ const parseRoute = (pathname: string): Route => {
 
 const routeToPath = (r: Route): string => {
   if (r.kind === "splash") return "/";
-  if (r.mode === "daily") return "/play";
+  if (r.mode === "practice") return "/play";
   return `/play/${num.toHex(r.tokenId)}`;
 };
 
@@ -271,14 +270,20 @@ function Board({
           preserveAspectRatio="none"
           aria-hidden="true"
         >
-          <path
-            d="M 3 3 H 97 V 97 H 3 Z"
+          <rect
+            x="3"
+            y="3"
+            width="94"
+            height="94"
+            rx="4"
+            ry="4"
             pathLength="100"
             fill="none"
             stroke="var(--accent)"
             strokeWidth={2}
-            strokeLinecap="round"
-            strokeDasharray="32 68"
+            strokeLinecap="butt"
+            strokeLinejoin="round"
+            strokeDasharray="18 82"
             vectorEffect="non-scaling-stroke"
           />
         </svg>
@@ -400,7 +405,9 @@ function EndScreen({
       <div className={`reveal ${won ? "win" : "lose"}`}>{finalWord.toLowerCase()}</div>
       <div className="end-actions">
         <button className="btn-ghost" onClick={onShare}>Share</button>
-        <button className="btn-primary" onClick={onPlayAgain}>Play again</button>
+        <button className="btn-primary replay-button" onClick={onPlayAgain} aria-label="Play again">
+          <span className="replay-icon" aria-hidden="true" />
+        </button>
       </div>
     </div>
   );
@@ -488,7 +495,7 @@ export default function App() {
         onDisconnect={() => disconnect()}
         toasts={toasts}
         onDismissToast={dismissToast}
-        onPlayDaily={() => navigate({ kind: "play", mode: "daily" })}
+        onPlayPractice={() => navigate({ kind: "play", mode: "practice" })}
       />
     );
   }
@@ -500,7 +507,7 @@ export default function App() {
       key={
         route.mode === "nft"
           ? `nft-${playNetwork.chainId}-${playNetwork.actionsAddress}-${route.tokenId.toString()}`
-          : `daily-${playNetwork.chainId}-${playNetwork.actionsAddress}`
+          : `practice-${playNetwork.chainId}-${playNetwork.actionsAddress}`
       }
       route={route}
       network={playNetwork}
@@ -522,14 +529,14 @@ function Splash({
   onDisconnect,
   toasts,
   onDismissToast,
-  onPlayDaily,
+  onPlayPractice,
 }: {
   isConnected: boolean;
   address?: string;
   onDisconnect: () => void;
   toasts: Toast[];
   onDismissToast: (id: number) => void;
-  onPlayDaily: () => void;
+  onPlayPractice: () => void;
 }) {
   return (
     <>
@@ -537,9 +544,19 @@ function Splash({
       <ToastStack toasts={toasts} onDismiss={onDismissToast} />
       <section className="splash">
         <SplashDemo />
-        <button className="btn-primary" onClick={onPlayDaily}>
-          Daily challenge
-        </button>
+        <div className="splash-actions">
+          <button className="btn-primary" onClick={onPlayPractice}>
+            Play
+          </button>
+          <a
+            className="btn-ghost"
+            href="https://beta.midgard.game/play"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Midgard
+          </a>
+        </div>
         {isConnected && (
           <>
             <p className="splash-meta">
@@ -586,7 +603,7 @@ function Play({
   onDismissToast,
   onPlayAgain,
 }: {
-  route: { kind: "play"; mode: "daily" } | { kind: "play"; mode: "nft"; tokenId: bigint };
+  route: { kind: "play"; mode: "practice" } | { kind: "play"; mode: "nft"; tokenId: bigint };
   network: ZordleNetwork;
   words: string[];
   wordIndex: Map<string, number>;
@@ -609,6 +626,7 @@ function Play({
   const [txPending, setTxPending] = useState(false);
   const [remainingWords, setRemainingWords] = useState<string[]>([]);
   const [flipRowIndex, setFlipRowIndex] = useState(-1);
+  const [restartNonce, setRestartNonce] = useState(0);
 
   const tokenId: bigint | null = route.mode === "nft" ? route.tokenId : null;
 
@@ -621,7 +639,7 @@ function Play({
       return;
     }
     if (!isReady || !account || !address) {
-      setMessage(route.mode === "daily" ? "loading" : "connect wallet to play");
+      setMessage(route.mode === "practice" ? "loading" : "connect wallet to play");
       setPhase("loading");
       return;
     }
@@ -632,7 +650,17 @@ function Play({
         if (route.mode === "nft") {
           id = route.tokenId;
         } else {
-          id = await getDailyGameId(network, address);
+          id = await getActiveGameId(network, address);
+          if (id === 0n) {
+            setMessage(<>starting<span className="dots"></span></>);
+            setTxPending(true);
+            const tx = await startPractice(network, account);
+            await account.waitForTransaction(tx.transaction_hash);
+            if (cancelled) return;
+            id = await getActiveGameId(network, address);
+            if (id === 0n) throw new Error("practice game did not start");
+            setTxPending(false);
+          }
         }
         if (cancelled) return;
         setGameId(id);
@@ -647,10 +675,8 @@ function Play({
           setTxPending(true);
           setPhase("playing");
           try {
-            const tx =
-              route.mode === "nft"
-                ? await startNftGame(network, account, route.tokenId)
-                : await startDaily(network, account);
+            if (tokenId === null) throw new Error("missing NFT token id");
+            const tx = await startNftGame(network, account, tokenId);
             await account.waitForTransaction(tx.transaction_hash);
             await refresh(id);
             setMessage(<>guess <span className="accent">1</span> of 6</>);
@@ -684,6 +710,8 @@ function Play({
         }
       } catch (err) {
         if (!cancelled) onToast(errorMessage(err));
+      } finally {
+        if (!cancelled) setTxPending(false);
       }
     })();
     return () => {
@@ -701,6 +729,7 @@ function Play({
     account,
     error,
     onToast,
+    restartNonce,
   ]);
 
   const refresh = async (id: bigint) => {
@@ -818,6 +847,24 @@ function Play({
     }
   }, [won, past, route, onToast]);
 
+  const handlePlayAgain = useCallback(() => {
+    if (route.mode === "nft") {
+      onPlayAgain();
+      return;
+    }
+    setPhase("loading");
+    setGameId(null);
+    setPast([]);
+    setActive("");
+    setMessage("loading");
+    setWon(false);
+    setFinalWord("");
+    setTxPending(false);
+    setRemainingWords([]);
+    setFlipRowIndex(-1);
+    setRestartNonce((n) => n + 1);
+  }, [route.mode, onPlayAgain]);
+
   if (route.mode === "nft" && !isConnected) {
     return (
       <>
@@ -839,7 +886,7 @@ function Play({
         <Header />
         <ToastStack toasts={toasts} onDismiss={onDismissToast} />
         <section className="splash">
-          <p className="splash-meta">daily is unavailable</p>
+          <p className="splash-meta">practice is unavailable</p>
         </section>
       </>
     );
@@ -889,7 +936,7 @@ function Play({
       <EndScreen
         won={won}
         finalWord={finalWord}
-        onPlayAgain={onPlayAgain}
+        onPlayAgain={handlePlayAgain}
         onShare={handleShare}
       />
     </>
