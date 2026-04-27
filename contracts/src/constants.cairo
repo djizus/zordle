@@ -6,8 +6,8 @@ pub const MAX_GUESSES: u8 = 6;
 pub const PATTERN_COUNT: u32 = 243;
 
 // Bitmap chunking. NUM_CHUNKS must cover the answer pool (the only set the
-// lazy boss is constrained to). For the NYT real-wordles list (2,315 words)
-// we need ceil(2315 / 256) = 10 u256 chunks.
+// lazy boss is constrained to). The official answer list has 2,315 words, so
+// ceil(2315 / 256) = 10 chunks.
 //
 // Note: the candidates bitmap covers the *answer pool*, not the full
 // vocabulary. Guess-only words live in word_ids beyond the bitmap's range

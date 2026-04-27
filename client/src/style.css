@@ -139,6 +139,18 @@ body {
     0 6px 24px rgba(169, 216, 255, 0.18);
   text-transform: lowercase;
   user-select: none;
+  cursor: pointer;
+  display: inline-block;
+  outline: none;
+  transition: transform 120ms ease, text-shadow 120ms ease;
+}
+
+.wordmark:hover,
+.wordmark:focus-visible {
+  transform: translateY(-1px);
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 28px rgba(169, 216, 255, 0.28);
 }
 
 .wordmark .accent {

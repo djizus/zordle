@@ -9,6 +9,8 @@ export type Game = {
   won: boolean;
   finalWordId: number;
   mode: number;
+  answerCount: number;
+  activeChunks: bigint;
 };
 
 export type Guess = {
@@ -40,6 +42,8 @@ export function decodeGame(felts: string[]): Game {
     won: bool(felts[5]),
     finalWordId: num(felts[6]),
     mode: num(felts[7]),
+    answerCount: num(felts[8] ?? "0"),
+    activeChunks: big(felts[9] ?? "0") + (big(felts[10] ?? "0") << 128n),
   };
 }
 

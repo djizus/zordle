@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "curate": "node curate_answers.mjs",
     "load": "node load_dictionary.mjs"
   },
   "dependencies": {

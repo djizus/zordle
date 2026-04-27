@@ -8,6 +8,8 @@
 # Optional:
 #   SLOT_NAME                  Cartridge slot name. Defaults to zordle-practice-slot.
 #   RPC_URL                    Override slot RPC.
+#   FORCE_DICTIONARY_RELOAD    Set to 1 to reset and reload dictionary even
+#                              when the world already has a finalized one.
 
 set -euo pipefail
 
@@ -120,7 +122,7 @@ is_dict_loaded() {
   [[ "$last" =~ ^0x0*1$ ]]
 }
 
-if is_dict_loaded; then
+if is_dict_loaded && [[ "${FORCE_DICTIONARY_RELOAD:-0}" != "1" ]]; then
   info "Dictionary already loaded — skipping load step"
 else
   if [[ ! -d "$ROOT/scripts/node_modules" ]]; then
@@ -128,11 +130,16 @@ else
     (cd "$ROOT/scripts" && pnpm install --silent)
   fi
 
-  info "Loading dictionary"
+  if is_dict_loaded; then
+    info "Dictionary already loaded — forcing reset + reload"
+  else
+    info "Loading dictionary"
+  fi
   NODE_URL="$RPC_URL" \
   ACCOUNT_ADDRESS="$SLOT_ACCOUNT_ADDRESS" \
   PRIVATE_KEY="$SLOT_PRIVATE_KEY" \
   SETUP_ADDRESS="$SETUP" \
+  RESET_DICTIONARY="${FORCE_DICTIONARY_RELOAD:-0}" \
     node "$ROOT/scripts/load_dictionary.mjs"
 fi
 

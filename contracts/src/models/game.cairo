@@ -22,6 +22,8 @@ pub impl GameImpl of GameTrait {
             won: false,
             final_word_id: 0,
             mode,
+            answer_count: 0,
+            active_chunks: 0,
         }
     }
 

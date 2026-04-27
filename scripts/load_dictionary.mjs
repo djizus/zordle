@@ -6,8 +6,11 @@
 //   ACCOUNT_ADDRESS   - prefunded katana account
 //   PRIVATE_KEY       - matching key
 //   SETUP_ADDRESS     - deployed setup contract (parsed from sozo manifest)
-//   ANSWER_FILE       - path to real-wordles file (default scripts/shuffled_real_wordles.txt)
-//   GUESS_FILE        - path to guess-only file (default scripts/official_allowed_guesses.txt)
+//   RESET_DICTIONARY  - set to 1 to call reset_dictionary before loading
+//   ANSWER_FILE       - path to answer candidate file
+//                       (default scripts/shuffled_real_wordles.txt)
+//   GUESS_FILE        - path to full valid guess dictionary
+//                       (default scripts/merged_valid_wordles.txt)
 //
 // Loads ANSWER_FILE first (word_ids 0..A-1 = answer pool), then GUESS_FILE
 // (word_ids A..A+G-1 = allowed-only). Calls finalize_dictionary(total, A).
@@ -27,12 +30,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const ANSWER_FILE = process.env.ANSWER_FILE
   ?? resolve(here, "shuffled_real_wordles.txt");
 const GUESS_FILE = process.env.GUESS_FILE
-  ?? resolve(here, "official_allowed_guesses.txt");
+  ?? resolve(here, "merged_valid_wordles.txt");
 
 const RPC = process.env.NODE_URL ?? "http://localhost:5050";
 const ACCOUNT = process.env.ACCOUNT_ADDRESS;
 const PRIVKEY = process.env.PRIVATE_KEY;
 const SETUP_ADDR = process.env.SETUP_ADDRESS;
+const RESET_DICTIONARY = process.env.RESET_DICTIONARY === "1";
 
 if (!ACCOUNT || !PRIVKEY || !SETUP_ADDR) {
   console.error(
@@ -122,6 +126,17 @@ console.log(`packs       : ${PACK_COUNT.toString().padStart(6)} (10 words each)`
 // Each batch of ~50 packs = 500 words, similar calldata size to the old loader.
 const PACK_BATCH = 50;
 const t0 = Date.now();
+
+if (RESET_DICTIONARY) {
+  console.log("Resetting dictionary before load");
+  const { transaction_hash } = await account.execute({
+    contractAddress: SETUP_ADDR,
+    entrypoint: "reset_dictionary",
+    calldata: [],
+  });
+  await provider.waitForTransaction(transaction_hash);
+}
+
 for (let i = 0; i < packs.length; i += PACK_BATCH) {
   const batch = packs.slice(i, i + PACK_BATCH).map(toU256);
   process.stdout.write(

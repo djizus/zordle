@@ -133,9 +133,9 @@ mkdir -p "$ROOT/client/public"
 
 # --- 6. install + run loader ---------------------------------------------
 
-# Skip the dictionary load on incremental redeploys — the setup contract
-# rejects re-loading via dict.assert_not_loaded(). Read the `loaded` flag
-# (last felt of the get_dictionary view's struct) and bail early if set.
+# Skip the dictionary load on incremental redeploys unless
+# FORCE_DICTIONARY_RELOAD=1 is set. Read the `loaded` flag (last felt of the
+# get_dictionary view's struct) and bail early if set.
 is_dict_loaded() {
   local out last
   out=$(sozo call --rpc-url "$RPC" "$ACTIONS" get_dictionary 2>/dev/null) || return 1
@@ -143,7 +143,7 @@ is_dict_loaded() {
   [[ "$last" =~ ^0x0*1$ ]]
 }
 
-if is_dict_loaded; then
+if is_dict_loaded && [[ "${FORCE_DICTIONARY_RELOAD:-0}" != "1" ]]; then
   echo "Dictionary already loaded, skipping..."
 else
   if [[ ! -d "$ROOT/scripts/node_modules" ]]; then
@@ -151,11 +151,16 @@ else
     (cd "$ROOT/scripts" && pnpm install --silent)
   fi
 
-  echo "Loading dictionary..."
+  if is_dict_loaded; then
+    echo "Dictionary already loaded, forcing reset + reload..."
+  else
+    echo "Loading dictionary..."
+  fi
   NODE_URL="$RPC" \
   ACCOUNT_ADDRESS="$ACCOUNT" \
   PRIVATE_KEY="$PRIVKEY" \
   SETUP_ADDRESS="$SETUP" \
+  RESET_DICTIONARY="${FORCE_DICTIONARY_RELOAD:-0}" \
     node "$ROOT/scripts/load_dictionary.mjs"
 fi
 

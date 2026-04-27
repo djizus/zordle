@@ -1,8 +1,8 @@
 {
   "world": {
     "class_hash": "0x381899226c066a0262f45d6ab815f89818e0874ec3e66cdf72b5e92d8db4680",
-    "address": "0x26f55e10b84f39e8cd5cc649bd58269003641e3b2cd33a550cd22e1e1b8397f",
-    "seed": "zordle_practice_slot_v1",
+    "address": "0xa0f44f58da9269496216a4d8e6c6ab266a0ea043333233b0194c5d6770871a",
+    "seed": "zordle_practice_slot_v2",
     "name": "Zordle Practice",
     "entrypoints": [
       "uuid",
@@ -33,8 +33,8 @@
   },
   "contracts": [
     {
-      "address": "0x4b405007e9940aeaa14fa941c3de7b0ecd06076675ccd285eaa6e54e8f9e827",
-      "class_hash": "0x6eed9288838d316191c73fbf563944625f834599a03dd3bce7be9f410dc8beb",
+      "address": "0xcc367703dbca15d1072570a20500c1ffa4686bd89fbcff5becdd2d4601aa26",
+      "class_hash": "0x76aa4dc1cfbe340c3e91efb5cf2be265cac201855aa1a73ee7db053d24de967",
       "init_calldata": [
         "0x127fd5f1fe78a71f8bcd1fec63e3fe2f0486b6ecd5c86a0466c3a21fa5cfcec",
         "0x0",
@@ -52,8 +52,8 @@
       ]
     },
     {
-      "address": "0x5aa455a5c5f7a29a7b98f8794b204454081278ba660c65dd137b9e0f8d2a9d6",
-      "class_hash": "0x5c9bc4d58a4b5906fa62d0be69c1e9b03806e47808d47882c3b01aea357dc85",
+      "address": "0x350c34cadad2f14ace259dcc5f6dc60683792b02af13f768727e9ec6b4f6854",
+      "class_hash": "0x575807a4429cc4aa2d9788bf5dfade49f42a9fd7c2cc6570846c358cdd67bdc",
       "init_calldata": [
         "0x127fd5f1fe78a71f8bcd1fec63e3fe2f0486b6ecd5c86a0466c3a21fa5cfcec"
       ],
@@ -62,6 +62,7 @@
       "systems": [
         "dojo_init",
         "load_word_packs",
+        "reset_dictionary",
         "finalize_dictionary",
         "upgrade"
       ]
@@ -176,9 +177,19 @@
           "name": "mode",
           "type": "core::integer::u8",
           "key": false
+        },
+        {
+          "name": "answer_count",
+          "type": "core::integer::u16",
+          "key": false
+        },
+        {
+          "name": "active_chunks",
+          "type": "core::integer::u256",
+          "key": false
         }
       ],
-      "class_hash": "0x2c8f8e93f859c02bcb99773993f8a16f9730e90979095f159497d46c0a1388c",
+      "class_hash": "0x15f804f41897e8068340473c68e915fa1f68234336e9d8c8201bd27dcb53ec3",
       "tag": "zordle_0_1-Game",
       "selector": "0xa71721adef42014d781935e47c9de7de2c15a66c296e512602695ede9522df"
     },
@@ -2597,6 +2608,14 @@
         {
           "name": "mode",
           "type": "core::integer::u8"
+        },
+        {
+          "name": "answer_count",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "active_chunks",
+          "type": "core::integer::u256"
         }
       ]
     },
@@ -2631,6 +2650,14 @@
         {
           "name": "mode",
           "type": "core::integer::u8"
+        },
+        {
+          "name": "answer_count",
+          "type": "core::integer::u16"
+        },
+        {
+          "name": "active_chunks",
+          "type": "core::integer::u256"
         }
       ]
     },
@@ -2932,6 +2959,13 @@
               "type": "core::array::Array::<core::integer::u256>"
             }
           ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "reset_dictionary",
+          "inputs": [],
           "outputs": [],
           "state_mutability": "external"
         },

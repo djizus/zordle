@@ -26,6 +26,7 @@ import { decodePattern, type Trit } from "./chain/state";
 import {
   getCandidateChunk,
   getActiveGameId,
+  getDictionary,
   getGame,
   getGuess,
 } from "./chain/views";
@@ -57,12 +58,13 @@ type Toast = {
   kind: "error" | "info";
 };
 
-const CANDIDATE_CHUNKS = 10;
 const MAX_GUESSES = 6;
+const CHUNK_BITS = 256;
+const DEFAULT_ANSWER_COUNT = 2315;
 
 const DEMO_WORDS = [
-  "crane", "stark", "cairo", "prove",
-  "block", "nonce", "chain", "trace",
+  "crane", "stark", "prove", "block", "chain",
+  "trace", "valid", "token", "crypt", "forge",
 ];
 
 // ---------- routing -------------------------------------------------------
@@ -193,7 +195,20 @@ function SplashDemo() {
 function Header() {
   return (
     <header className="site-header">
-      <h1 className="wordmark">z<span className="accent">o</span>rdle</h1>
+      <h1
+        className="wordmark"
+        role="link"
+        tabIndex={0}
+        onClick={() => navigate({ kind: "splash" })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            navigate({ kind: "splash" });
+          }
+        }}
+      >
+        z<span className="accent">o</span>rdle
+      </h1>
     </header>
   );
 }
@@ -453,6 +468,7 @@ export default function App() {
   const [bootPhase, setBootPhase] = useState<"loading" | "ready">("loading");
   const [words, setWords] = useState<string[]>([]);
   const [wordIndex, setWordIndex] = useState<Map<string, number>>(new Map());
+  const [answerCount, setAnswerCount] = useState(DEFAULT_ANSWER_COUNT);
 
   useEffect(() => {
     let cancelled = false;
@@ -467,6 +483,12 @@ export default function App() {
         if (cancelled) return;
         setWords(list);
         setWordIndex(new Map(list.map((w, i) => [w, i])));
+        try {
+          const dict = await getDictionary(networkForMode("practice"));
+          if (!cancelled && dict.answerCount > 0) setAnswerCount(dict.answerCount);
+        } catch {
+          // Keep the bundled dictionary fallback for splash metadata.
+        }
         setBootPhase("ready");
       } catch {
         // Stay on loading; user sees "loading".
@@ -496,6 +518,7 @@ export default function App() {
         toasts={toasts}
         onDismissToast={dismissToast}
         onPlayPractice={() => navigate({ kind: "play", mode: "practice" })}
+        answerCount={answerCount}
       />
     );
   }
@@ -530,6 +553,7 @@ function Splash({
   toasts,
   onDismissToast,
   onPlayPractice,
+  answerCount,
 }: {
   isConnected: boolean;
   address?: string;
@@ -537,6 +561,7 @@ function Splash({
   toasts: Toast[];
   onDismissToast: (id: number) => void;
   onPlayPractice: () => void;
+  answerCount: number;
 }) {
   return (
     <>
@@ -584,7 +609,7 @@ function Splash({
           </>
         )}
         <p className="splash-meta">
-          <strong>2,315</strong> words · <span className="accent">1</span> answer · zkorp
+          <strong>{answerCount.toLocaleString()}</strong> words · <span className="accent">1</span> answer · zkorp
         </p>
       </section>
     </>
@@ -668,6 +693,8 @@ function Play({
         // Fetch existing game state.
         const game = await getGame(network, id);
         if (cancelled) return;
+        const dict = await getDictionary(network);
+        if (cancelled) return;
 
         if (game.startedAt === 0n) {
           // Not started — kick off the start tx.
@@ -685,6 +712,13 @@ function Play({
           } finally {
             if (!cancelled) setTxPending(false);
           }
+          return;
+        }
+
+        if (game.answerCount !== 0 && game.answerCount !== dict.answerCount) {
+          setMessage("dictionary changed · start a fresh game");
+          setRemainingWords([]);
+          setPhase("loading");
           return;
         }
 
@@ -733,8 +767,10 @@ function Play({
   ]);
 
   const refresh = async (id: bigint) => {
+    const dict = await getDictionary(network);
+    const candidateChunks = Math.ceil(dict.answerCount / CHUNK_BITS);
     const out: string[] = [];
-    for (let chunk = 0; chunk < CANDIDATE_CHUNKS; chunk += 1) {
+    for (let chunk = 0; chunk < candidateChunks; chunk += 1) {
       let bits = await getCandidateChunk(network, id, chunk);
       let bit = 0;
       while (bits > 0n) {

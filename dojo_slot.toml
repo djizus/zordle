@@ -1,7 +1,7 @@
 [world]
 name = "Zordle Practice"
 description = "Loginless Zordle practice slot"
-seed = "zordle_practice_slot_v1"
+seed = "zordle_practice_slot_v2"
 
 [namespace]
 default = "zordle_0_1"

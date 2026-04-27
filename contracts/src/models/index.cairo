@@ -58,6 +58,12 @@ pub struct Game {
     pub won: bool,
     pub final_word_id: u16,
     pub mode: u8,
+    // Dictionary answer_count this game was initialized against. Used to
+    // avoid resuming stale practice games after a dictionary reload.
+    pub answer_count: u16,
+    // Bit i is set when CandidateChunk i is known to contain at least one
+    // surviving candidate. Used by guess() to skip empty chunk reads/scans.
+    pub active_chunks: u256,
 }
 
 // Current unfinished practice game for a player. When the referenced game is

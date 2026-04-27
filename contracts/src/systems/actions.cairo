@@ -8,7 +8,7 @@
 //      bitmap. The contract refuses if token_id has already been started or
 //      the caller doesn't own it.
 //   3. guess(token_id, word_id): pre_action → assert_ownership → walk the
-//      candidate bitmap, pick a uniform-random non-empty pattern bucket,
+//      candidate bitmap, pick a ~size^0.8-weighted non-empty pattern bucket,
 //      narrow. On terminal state (won, or 6th guess), post_action ends the
 //      token's lifecycle so Denshokan/Budokan can settle the score.
 // NFT randomness comes from Cartridge VRF on Sepolia/Mainnet (consume_random
@@ -49,6 +49,7 @@ pub trait IActionsView<T> {
 
 #[dojo::contract]
 pub mod actions {
+    use core::dict::Felt252Dict;
     use core::num::traits::{Bounded, Zero};
     use core::poseidon::poseidon_hash_span;
     use dojo::world::WorldStorage;
@@ -61,9 +62,7 @@ pub mod actions {
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_tx_info};
     use zordle::constants::{CHUNK_BITS, DEFAULT_NS, MAX_GUESSES, NUM_CHUNKS};
-    use zordle::helpers::bitmap::{
-        Bitmap, append_pattern_to_stream, kth_set_bit_u256, read_pattern_from_stream,
-    };
+    use zordle::helpers::bitmap::Bitmap;
     use zordle::helpers::power::TwoPower;
     use zordle::helpers::random::random_from;
     use zordle::helpers::wordle::compute_pattern;
@@ -198,8 +197,9 @@ pub mod actions {
     // pool. Used by both start_practice and start_game.
     fn populate_candidate_bitmap(
         ref store: Store, game_id: felt252, answer_count: u16,
-    ) {
+    ) -> u256 {
         let max_chunk: u256 = Bounded::<u256>::MAX;
+        let mut active_chunks: u256 = 0;
         let mut i: u8 = 0;
         while i < NUM_CHUNKS {
             let first_id: u32 = i.into() * CHUNK_BITS;
@@ -214,9 +214,11 @@ pub mod actions {
             };
             if bits != 0 {
                 store.set_candidate(@CandidateChunkTrait::new(game_id, i, bits));
+                active_chunks += TwoPower::pow(i);
             }
             i += 1;
         }
+        active_chunks
     }
 
     fn compute_practice_game_id(player: ContractAddress) -> felt252 {
@@ -224,6 +226,19 @@ pub mod actions {
         poseidon_hash_span(
             [player.into(), get_block_timestamp().into(), tx_info.transaction_hash].span(),
         )
+    }
+
+    fn bucket_weight(count: u32) -> u32 {
+        // Integer approximation of count^0.8 = fifth_root(count^4).
+        let count_u128: u128 = count.into();
+        let target: u128 = count_u128 * count_u128 * count_u128 * count_u128;
+        let mut root: u128 = 0;
+        let mut next: u128 = 1;
+        while next * next * next * next * next <= target {
+            root = next;
+            next += 1;
+        }
+        root.try_into().unwrap()
     }
 
     #[abi(embed_v0)]
@@ -239,7 +254,10 @@ pub mod actions {
             let active = store.active_game(player);
             if active.game_id != 0 {
                 let active_game = store.game(active.game_id);
-                if active_game.started_at != 0 && active_game.ended_at == 0 {
+                if active_game.started_at != 0
+                    && active_game.ended_at == 0
+                    && active_game.answer_count == dict.answer_count
+                    && active_game.active_chunks != 0 {
                     return active.game_id;
                 }
             }
@@ -248,11 +266,12 @@ pub mod actions {
             let existing = store.game(game_id);
             assert(existing.started_at == 0, Errors::ALREADY_STARTED);
 
-            let game = GameTrait::new(game_id, player, MODE_PRACTICE);
+            let mut game = GameTrait::new(game_id, player, MODE_PRACTICE);
+            game.answer_count = dict.answer_count;
+            game.active_chunks = populate_candidate_bitmap(ref store, game_id, dict.answer_count);
             store.set_game(@game);
             store.set_active_game(@ActiveGame { player, game_id });
 
-            populate_candidate_bitmap(ref store, game_id, dict.answer_count);
             game_id
         }
 
@@ -273,10 +292,10 @@ pub mod actions {
             assert(existing.started_at == 0, Errors::ALREADY_STARTED);
 
             let player = get_caller_address();
-            let game = GameTrait::new(token_id, player, MODE_NFT);
+            let mut game = GameTrait::new(token_id, player, MODE_NFT);
+            game.answer_count = dict.answer_count;
+            game.active_chunks = populate_candidate_bitmap(ref store, token_id, dict.answer_count);
             store.set_game(@game);
-
-            populate_candidate_bitmap(ref store, token_id, dict.answer_count);
         }
 
         fn guess(ref self: ContractState, game_id: felt252, word_id: u16) {
@@ -304,32 +323,40 @@ pub mod actions {
 
             let guess_letters = store.word_letters(word_id);
 
-            // Snapshot candidate chunks into an in-memory array so we don't
-            // re-read storage on the second pass.
+            // Snapshot active candidate chunks into memory so we don't
+            // re-read storage on the second pass. Empty chunks are skipped
+            // using the per-game active chunk mask.
+            let active_chunks = game.active_chunks;
+            assert(active_chunks != 0, Errors::NO_CANDIDATES);
+            let mut chunk_indices: Array<u8> = array![];
             let mut chunks: Array<u256> = array![];
             let mut i: u8 = 0;
             while i < NUM_CHUNKS {
-                chunks.append(store.candidate(game_id, i).bits);
+                if Bitmap::get(active_chunks, i) == 1 {
+                    chunk_indices.append(i);
+                    chunks.append(store.candidate(game_id, i).bits);
+                }
                 i += 1;
             }
 
             // ---- Pass 1 ----
             // pattern_seen: bit p == 1 ⇔ at least one surviving candidate
             //   produces pattern p (243 bits used, fits in a u256).
-            // pattern_stream: each candidate's pattern packed in iteration
-            //   order, 1 byte per candidate. Pass 2 reads it back by ordinal,
-            //   avoiding a re-compute.
+            // pattern_counts stores the bucket size for p, used to select a
+            // ~size^0.8-weighted non-empty bucket. This keeps the game's
+            // swingy bucket lottery while reducing tiny-bucket frequency.
             // word_pack cache: candidate_id / 10 → packed u256. Without this
             //   we'd re-read the same pack 10× for 10 consecutive candidates.
             let mut pattern_seen: u256 = 0;
-            let mut pattern_stream: Array<u8> = array![];
+            let mut pattern_counts: Felt252Dict<u32> = Default::default();
             let mut ordinal: u32 = 0;
             let mut cached_pack_id: u32 = 0xFFFFFFFF;
             let mut cached_pack: u256 = 0;
 
-            let mut chunk_index: u8 = 0;
-            while chunk_index < NUM_CHUNKS {
-                let mut bits: u256 = *chunks.at(chunk_index.into());
+            let mut active_index: u32 = 0;
+            while active_index < chunks.len() {
+                let chunk_index: u8 = *chunk_indices.at(active_index);
+                let mut bits: u256 = *chunks.at(active_index);
                 let chunk_base: u32 = chunk_index.into() * CHUNK_BITS;
                 let mut bit_idx: u32 = 0;
                 while bits > 0 {
@@ -350,16 +377,18 @@ pub mod actions {
                         if (pattern_seen / mask) % 2 == 0 {
                             pattern_seen += mask;
                         }
-                        append_pattern_to_stream(ref pattern_stream, pattern);
+                        let pattern_key: felt252 = pattern.into();
+                        let count = pattern_counts.get(pattern_key);
+                        pattern_counts.insert(pattern_key, count + 1);
                         ordinal += 1;
                     }
                     bits = bits / 2;
                     bit_idx += 1;
                 }
-                chunk_index += 1;
+                active_index += 1;
             }
 
-            // ---- Pick a uniform-random non-empty pattern via VRF ----
+            // ---- Pick a ~size^0.8-weighted non-empty pattern via VRF ----
             let bucket_count: u32 = Bitmap::popcount(pattern_seen).into();
             assert(bucket_count > 0, Errors::NO_CANDIDATES);
             // Salt depends on mode:
@@ -379,24 +408,64 @@ pub mod actions {
                 random_from(vrf_addr, salt)
             };
             let mix_u256: u256 = mix.into();
-            let k: u32 = (mix_u256 % bucket_count.into()).try_into().unwrap();
-            let chosen_pattern: u8 = kth_set_bit_u256(pattern_seen, k);
 
-            // ---- Pass 2: re-walk in lockstep with pattern_stream, narrow ----
+            let mut total_weight: u32 = 0;
+            let mut pattern_code: u8 = 0;
+            while pattern_code < 243 {
+                if Bitmap::get(pattern_seen, pattern_code) == 1 {
+                    let count = pattern_counts.get(pattern_code.into());
+                    total_weight += bucket_weight(count);
+                }
+                pattern_code += 1;
+            }
+            assert(total_weight > 0, Errors::NO_CANDIDATES);
+
+            let selected_weight: u32 = (mix_u256 % total_weight.into()).try_into().unwrap();
+            let mut cumulative_weight: u32 = 0;
+            let mut chosen_pattern: u8 = 0;
+            let mut found_pattern: bool = false;
+            let mut pattern_code: u8 = 0;
+            while pattern_code < 243 && !found_pattern {
+                if Bitmap::get(pattern_seen, pattern_code) == 1 {
+                    let count = pattern_counts.get(pattern_code.into());
+                    cumulative_weight += bucket_weight(count);
+                    if selected_weight < cumulative_weight {
+                        chosen_pattern = pattern_code;
+                        found_pattern = true;
+                    }
+                }
+                pattern_code += 1;
+            }
+            assert(found_pattern, Errors::NO_CANDIDATES);
+
+            // ---- Pass 2: re-walk active chunks and narrow ----
             let mut total_remaining: u32 = 0;
             let mut first_surviving: u32 = Bounded::<u32>::MAX;
-            let mut ordinal2: u32 = 0;
+            let mut new_active_chunks: u256 = 0;
+            let mut cached_pack_id: u32 = 0xFFFFFFFF;
+            let mut cached_pack: u256 = 0;
 
-            let mut chunk_index: u8 = 0;
-            while chunk_index < NUM_CHUNKS {
-                let mut bits: u256 = *chunks.at(chunk_index.into());
+            let mut active_index: u32 = 0;
+            while active_index < chunks.len() {
+                let chunk_index: u8 = *chunk_indices.at(active_index);
+                let mut bits: u256 = *chunks.at(active_index);
                 let chunk_base: u32 = chunk_index.into() * CHUNK_BITS;
                 let mut new_bits: u256 = 0;
                 let mut bit_idx: u32 = 0;
                 while bits > 0 {
                     if (bits % 2) == 1 {
                         let candidate_id: u32 = chunk_base + bit_idx;
-                        let pattern = read_pattern_from_stream(@pattern_stream, ordinal2);
+                        let pack_id: u32 = candidate_id / 10;
+                        if pack_id != cached_pack_id {
+                            cached_pack = store
+                                .word_pack(pack_id.try_into().unwrap())
+                                .packed;
+                            cached_pack_id = pack_id;
+                        }
+                        let pack_slot: u8 = (candidate_id % 10).try_into().unwrap();
+                        let shifted: u256 = cached_pack / TwoPower::pow(pack_slot * 25);
+                        let target: u32 = (shifted % 0x2000000_u256).try_into().unwrap();
+                        let pattern = compute_pattern(guess_letters, target);
                         if pattern == chosen_pattern {
                             new_bits = new_bits + TwoPower::pow(bit_idx.try_into().unwrap());
                             total_remaining += 1;
@@ -404,20 +473,21 @@ pub mod actions {
                                 first_surviving = candidate_id;
                             }
                         }
-                        ordinal2 += 1;
                     }
                     bits = bits / 2;
                     bit_idx += 1;
                 }
-                let old_bits = *chunks.at(chunk_index.into());
+                if new_bits != 0 {
+                    new_active_chunks += TwoPower::pow(chunk_index);
+                }
+                let old_bits = *chunks.at(active_index);
                 if new_bits != old_bits {
                     store
                         .set_candidate(@CandidateChunkTrait::new(game_id, chunk_index, new_bits));
                 }
-                chunk_index += 1;
+                active_index += 1;
             }
-            // Catches drift if Pass 1 / Pass 2 diverge in iteration order.
-            assert(ordinal == ordinal2, 'Guess: stream ordinal drift');
+            game.active_chunks = new_active_chunks;
 
             // ---- Log the guess ----
             store

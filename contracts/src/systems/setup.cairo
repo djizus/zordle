@@ -5,6 +5,8 @@
 //     Dictionary singleton (loaded = false).
 //   - load_word_packs: batch-insert pre-packed WordPack rows (10 words per
 //     u256 slot, 25 bits each). Reverts after finalize.
+//   - reset_dictionary: admin-only escape hatch for redeploys that need to
+//     replace an already-finalized dictionary in the same world.
 //   - finalize_dictionary: asserts the pack count matches ceil(words/10) and
 //     flips loaded, overwriting dict.word_count from "pack rows seen" to the
 //     real word count.
@@ -14,6 +16,7 @@
 #[starknet::interface]
 pub trait ISetup<T> {
     fn load_word_packs(ref self: T, start_pack_id: u16, packs: Array<u256>);
+    fn reset_dictionary(ref self: T);
     // Locks the dictionary. answer_count is the size of the prefix of
     // word_ids that the lazy boss is allowed to pick from; the remaining
     // [answer_count..expected_count) are valid guess words but can never
@@ -82,6 +85,15 @@ pub mod setup {
                 dict.word_count = new_count;
                 store.set_dictionary(@dict);
             }
+        }
+
+        fn reset_dictionary(ref self: ContractState) {
+            assert_admin(@self);
+
+            let world: WorldStorage = self.world(@DEFAULT_NS());
+            let mut store = StoreTrait::new(world);
+            let dict = DictionaryTrait::new();
+            store.set_dictionary(@dict);
         }
 
         fn finalize_dictionary(
