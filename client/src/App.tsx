@@ -331,7 +331,7 @@ const CandidateStrip = memo(function CandidateStrip({
   if (count === 0) {
     return (
       <section className="candidate-strip" aria-hidden="true">
-        <div className="candidate-label"><span className="count">···</span> valid guesses</div>
+        <div className="candidate-label"><span className="count">···</span> remaining</div>
         <div className="candidate-window">
           <div className="candidate-track static"></div>
         </div>
@@ -345,7 +345,7 @@ const CandidateStrip = memo(function CandidateStrip({
   return (
     <section className="candidate-strip" aria-label="valid guesses consistent with feedback">
       <div className="candidate-label">
-        <span className="count">{count.toLocaleString()}</span> valid guesses
+        <span className="count">{count.toLocaleString()}</span> remaining
       </div>
       <div className="candidate-window">
         <div
