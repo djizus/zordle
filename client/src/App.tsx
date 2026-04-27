@@ -59,7 +59,7 @@ type Toast = {
 };
 
 const MAX_GUESSES = 6;
-const DEFAULT_ANSWER_COUNT = 2315;
+const DEFAULT_WORD_COUNT = 14855;
 
 const DEMO_WORDS = [
   "crane", "stark", "prove", "block", "chain",
@@ -467,7 +467,7 @@ export default function App() {
   const [bootPhase, setBootPhase] = useState<"loading" | "ready">("loading");
   const [words, setWords] = useState<string[]>([]);
   const [wordIndex, setWordIndex] = useState<Map<string, number>>(new Map());
-  const [answerCount, setAnswerCount] = useState(DEFAULT_ANSWER_COUNT);
+  const [wordCount, setWordCount] = useState(DEFAULT_WORD_COUNT);
 
   useEffect(() => {
     let cancelled = false;
@@ -484,7 +484,7 @@ export default function App() {
         setWordIndex(new Map(list.map((w, i) => [w, i])));
         try {
           const dict = await getDictionary(networkForMode("practice"));
-          if (!cancelled && dict.answerCount > 0) setAnswerCount(dict.answerCount);
+          if (!cancelled && dict.wordCount > 0) setWordCount(dict.wordCount);
         } catch {
           // Keep the bundled dictionary fallback for splash metadata.
         }
@@ -517,7 +517,7 @@ export default function App() {
         toasts={toasts}
         onDismissToast={dismissToast}
         onPlayPractice={() => navigate({ kind: "play", mode: "practice" })}
-        answerCount={answerCount}
+        wordCount={wordCount}
       />
     );
   }
@@ -552,7 +552,7 @@ function Splash({
   toasts,
   onDismissToast,
   onPlayPractice,
-  answerCount,
+  wordCount,
 }: {
   isConnected: boolean;
   address?: string;
@@ -560,7 +560,7 @@ function Splash({
   toasts: Toast[];
   onDismissToast: (id: number) => void;
   onPlayPractice: () => void;
-  answerCount: number;
+  wordCount: number;
 }) {
   return (
     <>
@@ -608,7 +608,7 @@ function Splash({
           </>
         )}
         <p className="splash-meta">
-          <strong>{answerCount.toLocaleString()}</strong> words · <span className="accent">1</span> answer · zkorp
+          <strong>{wordCount.toLocaleString()}</strong> words · <span className="accent">1</span> answer · zkorp
         </p>
       </section>
     </>
