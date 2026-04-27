@@ -404,10 +404,10 @@ function EndScreen({
       </p>
       <div className={`reveal ${won ? "win" : "lose"}`}>{finalWord.toLowerCase()}</div>
       <div className="end-actions">
-        <button className="btn-ghost" onClick={onShare}>Share</button>
-        <button className="btn-primary replay-button" onClick={onPlayAgain} aria-label="Play again">
-          <span className="replay-icon" aria-hidden="true" />
+        <button className="btn-primary play-again" onClick={onPlayAgain}>
+          Play again
         </button>
+        <button className="btn-ghost" onClick={onShare}>Share</button>
       </div>
     </div>
   );

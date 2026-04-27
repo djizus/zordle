@@ -7,6 +7,7 @@
 import type { Connector } from "@starknet-react/core";
 import ControllerConnector from "@cartridge/connector/controller";
 import type { AuthOptions, ControllerOptions } from "@cartridge/controller";
+import { contractAddressFromManifest } from "./manifest";
 
 // Inline shape — @cartridge/presets's `SessionPolicies` is a peer dep we
 // don't want to add. The structure is stable.
@@ -29,14 +30,15 @@ const MAINNET_RPC_URL = "https://api.cartridge.gg/x/starknet/mainnet";
 const VRF_ADDRESS =
   "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f";
 
-const ACTIONS_ADDRESS =
-  import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS_NFT ??
-  import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS ??
-  "0x1";
 const NAMESPACE =
   import.meta.env.VITE_PUBLIC_NAMESPACE_NFT ??
   import.meta.env.VITE_PUBLIC_NAMESPACE ??
   "zordle_0_1";
+const ACTIONS_ADDRESS =
+  contractAddressFromManifest("sepolia", NAMESPACE, "actions") ??
+  import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS_NFT ??
+  import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS ??
+  "0x1";
 const SLOT = import.meta.env.VITE_PUBLIC_SLOT_NFT ?? import.meta.env.VITE_PUBLIC_SLOT ?? "zordle-sepolia";
 
 const stringToFelt = (v: string) =>

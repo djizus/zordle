@@ -1,4 +1,5 @@
 import { RpcProvider } from "starknet";
+import { contractAddressFromManifest } from "./manifest";
 
 export type GameMode = "practice" | "nft";
 
@@ -18,16 +19,25 @@ const env = import.meta.env;
 
 const legacyActions = env.VITE_PUBLIC_ACTIONS_ADDRESS as string | undefined;
 const legacyRpc = env.VITE_PUBLIC_NODE_URL as string | undefined;
+const nftNamespace = (env.VITE_PUBLIC_NAMESPACE_NFT as string | undefined) ?? "zordle_0_1";
+const practiceNamespace =
+  (env.VITE_PUBLIC_NAMESPACE_PRACTICE as string | undefined) ?? "zordle_0_1";
 
 const nftActions =
-  (env.VITE_PUBLIC_ACTIONS_ADDRESS_NFT as string | undefined) ?? legacyActions ?? "";
+  contractAddressFromManifest("sepolia", nftNamespace, "actions") ??
+  (env.VITE_PUBLIC_ACTIONS_ADDRESS_NFT as string | undefined) ??
+  legacyActions ??
+  "";
 const nftRpc =
   (env.VITE_PUBLIC_NODE_URL_NFT as string | undefined) ??
   legacyRpc ??
   "https://api.cartridge.gg/x/starknet/sepolia";
 
 const practiceActions =
-  (env.VITE_PUBLIC_ACTIONS_ADDRESS_PRACTICE as string | undefined) ?? legacyActions ?? "";
+  contractAddressFromManifest("slot", practiceNamespace, "actions") ??
+  (env.VITE_PUBLIC_ACTIONS_ADDRESS_PRACTICE as string | undefined) ??
+  legacyActions ??
+  "";
 const practiceRpc =
   (env.VITE_PUBLIC_NODE_URL_PRACTICE as string | undefined) ??
   legacyRpc ??
@@ -42,7 +52,7 @@ export const NFT_NETWORK: ZordleNetwork = {
     (env.VITE_PUBLIC_VRF_ADDRESS_NFT as string | undefined) ??
     (env.VITE_PUBLIC_VRF_ADDRESS as string | undefined) ??
     "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f",
-  namespace: (env.VITE_PUBLIC_NAMESPACE_NFT as string | undefined) ?? "zordle_0_1",
+  namespace: nftNamespace,
   slot: (env.VITE_PUBLIC_SLOT_NFT as string | undefined) ?? env.VITE_PUBLIC_SLOT,
 };
 
@@ -53,7 +63,7 @@ export const PRACTICE_NETWORK: ZordleNetwork = {
     (env.VITE_PUBLIC_CHAIN_ID_PRACTICE as string | undefined) ?? "WP_ZORDLE_PRACTICE_SLOT",
   actionsAddress: practiceActions,
   vrfAddress: (env.VITE_PUBLIC_VRF_ADDRESS_PRACTICE as string | undefined) ?? ZERO_ADDRESS,
-  namespace: (env.VITE_PUBLIC_NAMESPACE_PRACTICE as string | undefined) ?? "zordle_0_1",
+  namespace: practiceNamespace,
   slot: (env.VITE_PUBLIC_SLOT_PRACTICE as string | undefined) ?? "zordle-practice-slot",
 };
 

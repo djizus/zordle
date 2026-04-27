@@ -5,6 +5,7 @@ manifest_*.json
 # re-deploying. manifest_dev.json stays ignored: each contributor's local
 # katana world has different addresses.
 !manifest_sepolia.json
+!manifest_slot.json
 .snfoundry_cache/
 .dev/
 
