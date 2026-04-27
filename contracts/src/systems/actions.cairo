@@ -70,7 +70,7 @@ pub mod actions {
     use zordle::models::dictionary::DictionaryAssert;
     use zordle::models::game::{GameAssert, GameTrait, MODE_NFT, MODE_PRACTICE};
     use zordle::models::index::{ActiveGame, Game, Guess};
-    use zordle::store::{Store, StoreTrait};
+    use zordle::store::StoreTrait;
 
     component!(path: MinigameComponent, storage: minigame, event: MinigameEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
@@ -193,27 +193,27 @@ pub mod actions {
         }
     }
 
-    // Shared helper: write the per-game candidate bitmap for the answer
-    // pool. Used by both start_practice and start_game.
-    fn populate_candidate_bitmap(
-        ref store: Store, game_id: felt252, answer_count: u16,
-    ) -> u256 {
+    fn initial_candidate_bits(index: u8, answer_count: u16) -> u256 {
         let max_chunk: u256 = Bounded::<u256>::MAX;
+        let first_id: u32 = index.into() * CHUNK_BITS;
+        let next_id: u32 = (index.into() + 1) * CHUNK_BITS;
+        if next_id <= answer_count.into() {
+            max_chunk
+        } else if first_id >= answer_count.into() {
+            0
+        } else {
+            let live: u32 = answer_count.into() - first_id;
+            TwoPower::pow(live.try_into().unwrap()) - 1
+        }
+    }
+
+    // Shared helper: compute the initial active chunk mask for the answer
+    // pool. Candidate chunks are materialized lazily after the first guess.
+    fn initial_active_chunks(answer_count: u16) -> u256 {
         let mut active_chunks: u256 = 0;
         let mut i: u8 = 0;
         while i < NUM_CHUNKS {
-            let first_id: u32 = i.into() * CHUNK_BITS;
-            let next_id: u32 = (i.into() + 1) * CHUNK_BITS;
-            let bits: u256 = if next_id <= answer_count.into() {
-                max_chunk
-            } else if first_id >= answer_count.into() {
-                0
-            } else {
-                let live: u32 = answer_count.into() - first_id;
-                TwoPower::pow(live.try_into().unwrap()) - 1
-            };
-            if bits != 0 {
-                store.set_candidate(@CandidateChunkTrait::new(game_id, i, bits));
+            if initial_candidate_bits(i, answer_count) != 0 {
                 active_chunks += TwoPower::pow(i);
             }
             i += 1;
@@ -268,7 +268,7 @@ pub mod actions {
 
             let mut game = GameTrait::new(game_id, player, MODE_PRACTICE);
             game.answer_count = dict.answer_count;
-            game.active_chunks = populate_candidate_bitmap(ref store, game_id, dict.answer_count);
+            game.active_chunks = initial_active_chunks(dict.answer_count);
             store.set_game(@game);
             store.set_active_game(@ActiveGame { player, game_id });
 
@@ -294,7 +294,7 @@ pub mod actions {
             let player = get_caller_address();
             let mut game = GameTrait::new(token_id, player, MODE_NFT);
             game.answer_count = dict.answer_count;
-            game.active_chunks = populate_candidate_bitmap(ref store, token_id, dict.answer_count);
+            game.active_chunks = initial_active_chunks(dict.answer_count);
             store.set_game(@game);
         }
 
@@ -334,7 +334,12 @@ pub mod actions {
             while i < NUM_CHUNKS {
                 if Bitmap::get(active_chunks, i) == 1 {
                     chunk_indices.append(i);
-                    chunks.append(store.candidate(game_id, i).bits);
+                    let bits = if game.guesses_used == 0 {
+                        initial_candidate_bits(i, game.answer_count)
+                    } else {
+                        store.candidate(game_id, i).bits
+                    };
+                    chunks.append(bits);
                 }
                 i += 1;
             }
@@ -481,7 +486,7 @@ pub mod actions {
                     new_active_chunks += TwoPower::pow(chunk_index);
                 }
                 let old_bits = *chunks.at(active_index);
-                if new_bits != old_bits {
+                if new_bits != 0 && (game.guesses_used == 0 || new_bits != old_bits) {
                     store
                         .set_candidate(@CandidateChunkTrait::new(game_id, chunk_index, new_bits));
                 }
@@ -543,7 +548,16 @@ pub mod actions {
 
         fn get_chunk(self: @ContractState, game_id: felt252, index: u8) -> u256 {
             let world: WorldStorage = self.world(@DEFAULT_NS());
-            StoreTrait::new(world).candidate(game_id, index).bits
+            let store = StoreTrait::new(world);
+            let game = store.game(game_id);
+            if game.started_at == 0 || Bitmap::get(game.active_chunks, index) == 0 {
+                return 0;
+            }
+            if game.guesses_used == 0 {
+                initial_candidate_bits(index, game.answer_count)
+            } else {
+                store.candidate(game_id, index).bits
+            }
         }
 
         fn get_guess(self: @ContractState, game_id: felt252, index: u8) -> Guess {
