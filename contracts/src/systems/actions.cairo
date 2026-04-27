@@ -228,17 +228,36 @@ pub mod actions {
         )
     }
 
+    // Largest u128 r such that r^5 <= target. Doubling search to bracket the
+    // root in O(log target), then binary search inside the bracket. Replaces
+    // an earlier linear scan whose worst case (root = 491 for a full 2315
+    // pool) dominated selection cost.
+    fn fifth_root(target: u128) -> u128 {
+        if target == 0 {
+            return 0;
+        }
+        let mut hi: u128 = 1;
+        while hi * hi * hi * hi * hi <= target {
+            hi = hi * 2;
+        }
+        let mut lo: u128 = hi / 2;
+        while lo + 1 < hi {
+            let mid: u128 = (lo + hi) / 2;
+            let mid5: u128 = mid * mid * mid * mid * mid;
+            if mid5 <= target {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
     fn bucket_weight(count: u32) -> u32 {
         // Integer approximation of count^0.8 = fifth_root(count^4).
         let count_u128: u128 = count.into();
         let target: u128 = count_u128 * count_u128 * count_u128 * count_u128;
-        let mut root: u128 = 0;
-        let mut next: u128 = 1;
-        while next * next * next * next * next <= target {
-            root = next;
-            next += 1;
-        }
-        root.try_into().unwrap()
+        fifth_root(target).try_into().unwrap()
     }
 
     #[abi(embed_v0)]
@@ -590,6 +609,59 @@ pub mod actions {
                 active.game_id
             } else {
                 0
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{bucket_weight, fifth_root};
+
+        // bucket_weight(count) = floor(count^0.8) = floor(fifth_root(count^4)).
+        // Hand-computed expected values cover edge cases, monotonicity
+        // boundaries, and the realistic full-pool maximum.
+        #[test]
+        fn test_bucket_weight_known_values() {
+            assert_eq!(bucket_weight(0), 0);
+            assert_eq!(bucket_weight(1), 1);
+            assert_eq!(bucket_weight(2), 1); // 2^4 = 16, 1^5=1 <= 16 < 32 = 2^5
+            assert_eq!(bucket_weight(3), 2); // 3^4 = 81, 2^5=32 <= 81 < 243
+            assert_eq!(bucket_weight(10), 6); // 10^4=10000, 6^5=7776 <= 10000 < 16807
+            assert_eq!(bucket_weight(100), 39); // 100^4=1e8, 39^5≈9.0e7, 40^5≈1.02e8
+            assert_eq!(bucket_weight(246), 81); // largest single bucket on a 2315 pool
+            assert_eq!(bucket_weight(2315), 491); // full-pool extreme: 491^5 < 2315^4 < 492^5
+        }
+
+        // bucket_weight is non-decreasing: larger buckets are never weighted
+        // less than smaller ones. Anything else would invert the difficulty
+        // curve.
+        #[test]
+        fn test_bucket_weight_monotonic_small_range() {
+            let mut prev: u32 = 0;
+            let mut count: u32 = 0;
+            while count <= 64 {
+                let w = bucket_weight(count);
+                assert!(w >= prev, "bucket_weight non-monotonic");
+                prev = w;
+                count += 1;
+            }
+        }
+
+        // fifth_root invariant: r^5 <= target < (r+1)^5 for every r returned.
+        #[test]
+        fn test_fifth_root_invariant() {
+            let mut count: u128 = 0;
+            while count <= 64 {
+                let target = count * count * count * count;
+                let r = fifth_root(target);
+                let r5 = r * r * r * r * r;
+                assert!(r5 <= target, "fifth_root: r^5 > target");
+                if target > 0 {
+                    let rp1 = r + 1;
+                    let rp1_5 = rp1 * rp1 * rp1 * rp1 * rp1;
+                    assert!(target < rp1_5, "fifth_root: (r+1)^5 <= target");
+                }
+                count += 1;
             }
         }
     }
