@@ -124,11 +124,12 @@ STRK and the world creation is irreversible.
 
 ### Pre-deploy
 
-1. Replace the Denshokan placeholder (`0x0`) in `dojo_mainnet.toml`'s
-   `zordle_0_1-actions` `init_call_args` with the mainnet MinigameToken
-   address. The deploy script aborts if the placeholder is still present.
-2. Fund the deployer address with enough STRK for migrate + the
-   ~14855-tx dictionary load. See gas reference below.
+1. Verify `dojo_mainnet.toml`'s `zordle_0_1-actions` `init_call_args` uses
+   the known mainnet MinigameToken address:
+   `0x00263cc540dac11334470a64759e03952ee2f84a290e99ba8cbc391245cd0bf9`.
+   The deploy script aborts if it finds anything else.
+2. Fund the deployer address with enough STRK for migrate + the batched
+   dictionary load. See gas reference below.
 
 ### Required env
 
@@ -149,9 +150,10 @@ DEPLOYER_PRIVATE_KEY=0x... \
 
 Same shape as `deploy_sepolia.sh`: `sozo build -P mainnet` →
 `sozo migrate -P mainnet` (5x retry/backoff) → write
-`manifest_mainnet.json` and `client/.env.mainnet` →
-`load_dictionary.mjs` (idempotent, skips if `loaded == 1`). Re-running on
-the same world is safe; class upgrades migrate incrementally.
+`manifest_mainnet.json` and `client/.env.mainnet` with the current practice
+slot carryover → `load_dictionary.mjs` (batched, idempotent, skips if
+`loaded == 1`). Re-running on the same world is safe; class upgrades migrate
+incrementally.
 
 ### Client
 
@@ -181,13 +183,12 @@ chain.
 
 ## Gas reference
 
-Approximate slot-measured costs (extrapolated to mainnet at
-~$9.24×10⁻¹⁰/l2_gas):
+Approximate observed costs:
 
 | Action | l2_gas | Mainnet ≈ |
 |---|---|---|
 | `start_practice` | 5.30M | $0.005 |
-| `guess` turn 1 (full 2315 walk) | ~1.4B | ~$1.30 |
-| `guess` turn 2+ (narrowed) | 30–270M | $0.03–$0.25 |
+| `guess` turn 1 (full 2315 walk) | ~924M | ~$0.85 |
+| `guess` turn 2+ (narrowed) | ~309M | ~$0.29 |
 
-Per-game total typically $1.30–$1.70 mainnet.
+Per-game total typically depends on how quickly the candidate set narrows.

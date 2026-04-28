@@ -20,15 +20,14 @@ rpc_url = "https://api.cartridge.gg/x/starknet/mainnet"
 # Wires the actions contract to Cartridge's shared infrastructure on Mainnet:
 #   - creator: replaced at deploy time by deploy_mainnet.sh with the deployer
 #     address (used by Denshokan for game-creator metadata).
-#   - Denshokan: shared MinigameToken contract on mainnet. The 0x0 here is a
-#     placeholder — replace it with the real mainnet address before deploying;
-#     deploy_mainnet.sh aborts otherwise.
+#   - Denshokan: shared MinigameToken contract on mainnet. deploy_mainnet.sh
+#     verifies this exact mainnet address before spending real STRK.
 #   - renderer: 0x1 == Option::None — fall back to Denshokan's default SVG.
 #   - VRF: Cartridge VRF — same address on Sepolia and Mainnet.
 [init_call_args]
 "zordle_0_1-actions" = [
     "0x047dc688Abc3E6e58ed9F0171dE5aeCd22C08E8A08c469B2bb2267C9E7af1813",
-    "0x0",
+    "0x00263cc540dac11334470a64759e03952ee2f84a290e99ba8cbc391245cd0bf9",
     "0x1",
     "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f",
 ]

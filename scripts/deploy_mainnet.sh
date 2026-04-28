@@ -17,11 +17,10 @@
 #   - writes client/public/words.txt as part of the dictionary load
 #
 # Pre-deploy checklist:
-#   - Replace the Denshokan placeholder (0x0) in dojo_mainnet.toml's
-#     "zordle_0_1-actions" init_call_args with the mainnet MinigameToken
-#     address. The script aborts if the placeholder is still present.
-#   - Verify the deployer is funded for ~14855 dictionary-load txs plus
-#     migrate. Per-game gas reference: docs/deploy.md.
+#   - Verify dojo_mainnet.toml's "zordle_0_1-actions" init_call_args uses the
+#     known mainnet MinigameToken (Denshokan) address. The script aborts if not.
+#   - Verify the deployer is funded for migrate plus the batched dictionary
+#     load. Per-game gas reference: docs/deploy.md.
 #
 # Idempotency:
 #   - sozo migrate is incremental: re-running with the same dojo_mainnet.toml +
@@ -43,9 +42,13 @@ cd "$ROOT"
 
 PROFILE="mainnet"
 MANIFEST="$ROOT/manifest_mainnet.json"
+PRACTICE_MANIFEST="$ROOT/manifest_slot.json"
 DOJO_CONFIG="$ROOT/dojo_mainnet.toml"
 CLIENT_ENV="$ROOT/client/.env.mainnet"
 DEFAULT_RPC="https://api.cartridge.gg/x/starknet/mainnet"
+EXPECTED_MAINNET_DENSHOKAN="0x00263cc540dac11334470a64759e03952ee2f84a290e99ba8cbc391245cd0bf9"
+PRACTICE_SLOT_NAME="${PRACTICE_SLOT_NAME:-zordle-practice-slot}"
+PRACTICE_RPC_URL="${PRACTICE_RPC_URL:-https://api.cartridge.gg/x/${PRACTICE_SLOT_NAME}/katana}"
 DOJO_CONFIG_BAK="$ROOT/.dojo_mainnet.toml.bak.$$"
 
 restore_dojo_config() {
@@ -69,7 +72,7 @@ fail()  { echo -e "${RED}[deploy]${NC} $1" >&2; }
 if [[ "${MAINNET_CONFIRM:-}" != "YES" ]]; then
   fail "Mainnet deploys require explicit confirmation."
   echo "  Re-run with MAINNET_CONFIRM=YES if you really intend to deploy on mainnet."
-  echo "  This is real money: world creation, ~14855 dictionary-load txs, irreversible."
+  echo "  This is real money: world creation, batched dictionary load, irreversible."
   exit 1
 fi
 
@@ -78,12 +81,14 @@ if [[ ! -f "$DOJO_CONFIG" ]]; then
   exit 1
 fi
 
-# Refuse to run with the Denshokan placeholder still in place. The placeholder
-# line is "    \"0x0\",\n" — distinctive because no other init arg uses 0x0.
-if grep -Eq '^\s*"0x0",\s*$' "$DOJO_CONFIG"; then
-  fail "Denshokan placeholder (0x0) still in $DOJO_CONFIG."
-  echo "  Replace the second init_call_args entry for zordle_0_1-actions with the"
-  echo "  mainnet MinigameToken (Denshokan) address before deploying."
+# Refuse to run unless the actions contract is wired to the known mainnet
+# MinigameToken. A wrong nonzero Denshokan address is worse than a placeholder:
+# the deployed world would be permanently wired to the wrong NFT gate.
+CONFIG_DENSHOKAN=$(perl -0ne 'if (/"zordle_0_1-actions"\s*=\s*\[\s*"[^"]+"\s*,\s*"([^"]+)"/s) { print $1 }' "$DOJO_CONFIG")
+if [[ "$CONFIG_DENSHOKAN" != "$EXPECTED_MAINNET_DENSHOKAN" ]]; then
+  fail "Unexpected Denshokan address in $DOJO_CONFIG."
+  echo "  Found:    ${CONFIG_DENSHOKAN:-<missing>}"
+  echo "  Expected: $EXPECTED_MAINNET_DENSHOKAN"
   exit 1
 fi
 
@@ -97,7 +102,13 @@ fi
 
 RPC_URL="${RPC_URL:-$DEFAULT_RPC}"
 
-for dep in sozo jq node; do
+if [[ ! -f "$PRACTICE_MANIFEST" ]]; then
+  fail "Missing $PRACTICE_MANIFEST."
+  echo "  Mainnet client env includes practice mode; deploy the slot first or restore manifest_slot.json."
+  exit 1
+fi
+
+for dep in sozo jq node perl; do
   if ! command -v "$dep" >/dev/null 2>&1; then
     fail "Required tool not found: $dep"
     exit 1
@@ -159,10 +170,24 @@ WORLD=$(jq -r '.world.address' "$MANIFEST")
 ACTIONS=$(jq -r '.contracts[] | select(.tag == "zordle_0_1-actions") | .address' "$MANIFEST")
 SETUP=$(jq -r '.contracts[] | select(.tag == "zordle_0_1-setup") | .address' "$MANIFEST")
 DENSHOKAN=$(jq -r '.contracts[] | select(.tag == "zordle_0_1-actions") | .init_calldata[1]' "$MANIFEST")
+PRACTICE_WORLD=$(jq -r '.world.address' "$PRACTICE_MANIFEST")
+PRACTICE_ACTIONS=$(jq -r '.contracts[] | select(.tag == "zordle_0_1-actions") | .address' "$PRACTICE_MANIFEST")
 
 if [[ -z "$WORLD" || -z "$ACTIONS" || -z "$SETUP" ]]; then
   fail "Failed to extract one or more addresses from $MANIFEST"
   echo "  WORLD=$WORLD ACTIONS=$ACTIONS SETUP=$SETUP"
+  exit 1
+fi
+
+if [[ "$DENSHOKAN" != "$EXPECTED_MAINNET_DENSHOKAN" ]]; then
+  fail "Migrated Actions contract has unexpected Denshokan init calldata."
+  echo "  Found:    ${DENSHOKAN:-<missing>}"
+  echo "  Expected: $EXPECTED_MAINNET_DENSHOKAN"
+  exit 1
+fi
+
+if [[ -z "$PRACTICE_WORLD" || -z "$PRACTICE_ACTIONS" || "$PRACTICE_WORLD" == "null" || "$PRACTICE_ACTIONS" == "null" ]]; then
+  fail "Failed to extract practice addresses from $PRACTICE_MANIFEST"
   exit 1
 fi
 
@@ -195,6 +220,16 @@ VITE_PUBLIC_ACTIONS_ADDRESS_NFT=$ACTIONS
 VITE_PUBLIC_DENSHOKAN_ADDRESS=$DENSHOKAN
 VITE_PUBLIC_VRF_ADDRESS=0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f
 VITE_PUBLIC_VRF_ADDRESS_NFT=0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f
+
+# --- practice slot (begin) ---
+VITE_PUBLIC_NAMESPACE_PRACTICE=zordle_0_1
+VITE_PUBLIC_SLOT_PRACTICE=$PRACTICE_SLOT_NAME
+VITE_PUBLIC_NODE_URL_PRACTICE=$PRACTICE_RPC_URL
+VITE_PUBLIC_CHAIN_ID_PRACTICE=WP_ZORDLE_PRACTICE_SLOT
+VITE_PUBLIC_WORLD_ADDRESS_PRACTICE=$PRACTICE_WORLD
+VITE_PUBLIC_ACTIONS_ADDRESS_PRACTICE=$PRACTICE_ACTIONS
+VITE_PUBLIC_VRF_ADDRESS_PRACTICE=0x0
+# --- practice slot (end) ---
 EOF
 
 if [[ ! -d "$ROOT/scripts/node_modules" ]]; then
