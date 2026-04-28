@@ -1,9 +1,9 @@
 {
   "world": {
     "class_hash": "0x381899226c066a0262f45d6ab815f89818e0874ec3e66cdf72b5e92d8db4680",
-    "address": "0xa0f44f58da9269496216a4d8e6c6ab266a0ea043333233b0194c5d6770871a",
-    "seed": "zordle_practice_slot_v2",
-    "name": "Zordle Practice",
+    "address": "0x22bfb1f46dc89274b98ebac9380b7a1a5f56dd5d8e9a2dc90478aa5af6646aa",
+    "seed": "zordle_sepolia_v1",
+    "name": "Zordle",
     "entrypoints": [
       "uuid",
       "set_metadata",
@@ -33,13 +33,13 @@
   },
   "contracts": [
     {
-      "address": "0xcc367703dbca15d1072570a20500c1ffa4686bd89fbcff5becdd2d4601aa26",
+      "address": "0x1f2ea3e0a8904f7a6271195e6184942fef4b7663ac21ef74decd94765a7903a",
       "class_hash": "0x5f61f2431f99a82178adf8c5bc7a701131caa146ccff77d47d40839a813a631",
       "init_calldata": [
-        "0x127fd5f1fe78a71f8bcd1fec63e3fe2f0486b6ecd5c86a0466c3a21fa5cfcec",
-        "0x0",
+        "0x066bE88C48b0D71d1Bded275e211C2dDe1EF1c078Fd57ece1313f130Bbc5b859",
+        "0x0004e6e5bbf18424dfb825f1dbb65e10473b4603a1ec7b9ab02c143d877114f9",
         "0x1",
-        "0x0"
+        "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f"
       ],
       "tag": "zordle_0_1-actions",
       "selector": "0x3622d16dadbc2aefcc084f885aa684d134863c014b08c9b5a6ba703f8d9fe89",
@@ -52,10 +52,10 @@
       ]
     },
     {
-      "address": "0x350c34cadad2f14ace259dcc5f6dc60683792b02af13f768727e9ec6b4f6854",
+      "address": "0x493c003f7027226f9ad0a96625a2f76220008f3ecbdae0efd4fb2b2a15e95f4",
       "class_hash": "0x575807a4429cc4aa2d9788bf5dfade49f42a9fd7c2cc6570846c358cdd67bdc",
       "init_calldata": [
-        "0x127fd5f1fe78a71f8bcd1fec63e3fe2f0486b6ecd5c86a0466c3a21fa5cfcec"
+        "0x066bE88C48b0D71d1Bded275e211C2dDe1EF1c078Fd57ece1313f130Bbc5b859"
       ],
       "tag": "zordle_0_1-setup",
       "selector": "0x7e15de2fb82996e1bd4818404fb2dbd6c9682c65223b0cdf6fbb7a0cbcdc66d",

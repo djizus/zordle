@@ -1,6 +1,6 @@
 # Zordle Bucket Selection Analysis
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 This doc records the design exploration that shaped the lazy-boss rule
 shipped in `contracts/src/systems/actions.cairo`. It captures the problem,
@@ -34,7 +34,7 @@ strictly grinding.
 `scripts/pattern_distribution.mjs` regenerates these numbers for any
 opener / pool combination.
 
-## Approach considered and why we passed on them
+## Approaches considered and why we passed on them
 
 - **Hard min-bucket-size filter (K)**: only buckets ≥ K candidates eligible.
   Clean math, but feels grafted on; one more constant to tune.
@@ -49,7 +49,7 @@ opener / pool combination.
 
 ## What shipped
 
-Two compounding changes, in `contracts/src/systems/actions.cairo`:
+Three compounding changes, in `contracts/src/systems/actions.cairo`:
 
 1. **Bucket selection weighted by `count^0.8`.** Sits between uniform and
    linear weighting. Cheap singleton collapses become rare, the game stays
@@ -60,6 +60,10 @@ Two compounding changes, in `contracts/src/systems/actions.cairo`:
    first guess recomputes the initial bitmap in-memory; only chunks that
    actually change (or are non-zero on the first narrow) get persisted.
    Net effect: `start_practice` cost dropped 43% in measured slot fees.
+3. **First-guess pattern reuse.** The first guess computes each candidate's
+   feedback pattern once, stores the compact pattern stream in memory, then
+   reuses it while narrowing. This brought observed first-guess gas under the
+   1B L2 gas cap used by the sponsored transaction flow.
 
 Plus a difficulty knob from the **dictionary side**: the answer pool stays
 the canonical 2,315 NYT words, but the guess vocabulary expanded to 14,855
@@ -82,20 +86,20 @@ have surviving candidates). Frontend reads these — see
 
 ## Verification
 
-- `cd contracts && scarb test` (16 helper tests).
+- `cd contracts && scarb test`.
 - `node scripts/pattern_distribution.mjs <opener>` for offline distribution
   sanity.
 - Slot smoke test: `start_practice` + `guess` against the deployed slot
   world. See `docs/deploy.md` for runbook.
 
-## Gas, measured on the slot
+## Gas, observed after the first-guess optimization
 
-| Action | l2_gas | Mainnet ≈ ($9.24×10⁻¹⁰/gas) |
-|---|---|---|
-| `start_practice` | 5.30M | $0.005 |
-| `guess` turn 1 (full 2315 walk) | ~1.4B | ~$1.30 |
-| `guess` turn 2+ (narrowed) | ~30–270M | $0.03–$0.25 |
+| Action | l2_gas |
+|---|---|
+| `start_practice` | 5.30M |
+| `guess` turn 1 (full 2315 walk) | ~924M |
+| `guess` turn 2+ (narrowed) | ~309M in the measured Sepolia sample |
 
-Per-game total typically lands around **$1.30–$1.70** on mainnet pricing.
-Turn 1 dominates because the lazy boss must touch every surviving
-candidate to compute bucket weights.
+Turn 1 still dominates because the lazy boss must touch every surviving
+candidate to compute bucket weights, but the hot path now fits under the
+sponsored 1B L2 gas cap seen in NFT mode.

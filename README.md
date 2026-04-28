@@ -1,8 +1,9 @@
 # Zordle
 
 A fully on-chain Wordle clone built on [Dojo](https://dojoengine.org) and
-deployed to [Cartridge](https://cartridge.gg) Katana. Daily-scheduled
-practice mode is loginless via a burner; NFT mode runs on Sepolia.
+deployed with [Cartridge](https://cartridge.gg). Practice mode runs on a
+Cartridge Katana slot with loginless burner play; NFT mode runs on Sepolia and
+Mainnet through Cartridge Controller.
 
 **Play:** [zordle-azure.vercel.app](https://zordle-azure.vercel.app)
 
@@ -59,10 +60,11 @@ dev server.
 
 - **Practice slot** (Cartridge Katana): `scripts/deploy_slot.sh`
 - **Sepolia NFT mode**: `scripts/deploy_sepolia.sh`
+- **Mainnet NFT mode**: `scripts/deploy_mainnet.sh`
 
 See [`docs/deploy.md`](./docs/deploy.md) for the full runbook including
-when to bump `dojo_*.toml` seeds, when to force a dictionary reload, and
-how to verify the deploy via `sozo call`.
+mainnet guardrails, practice-slot carryover, when to bump `dojo_*.toml` seeds,
+when to force a dictionary reload, and how to verify the deploy via `sozo call`.
 
 ## Testing
 

@@ -62,7 +62,7 @@ pub mod actions {
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_tx_info};
     use zordle::constants::{CHUNK_BITS, DEFAULT_NS, MAX_GUESSES, NUM_CHUNKS};
-    use zordle::helpers::bitmap::Bitmap;
+    use zordle::helpers::bitmap::{append_pattern_to_stream, read_pattern_from_stream, Bitmap};
     use zordle::helpers::power::TwoPower;
     use zordle::helpers::random::random_from;
     use zordle::helpers::wordle::compute_pattern;
@@ -347,6 +347,21 @@ pub mod actions {
             // using the per-game active chunk mask.
             let active_chunks = game.active_chunks;
             assert(active_chunks != 0, Errors::NO_CANDIDATES);
+
+            // Consume VRF as soon as the guess has passed cheap validity
+            // checks. If later bucket work fails, the provider has still
+            // been consumed and the surfaced revert points at the guess.
+            let salt: felt252 = poseidon_hash_span(
+                [game_id, game.guesses_used.into(), word_id.into()].span(),
+            );
+            let vrf_addr = self.vrf_address.read();
+            let mix = if vrf_addr.is_zero() {
+                salt
+            } else {
+                random_from(vrf_addr, salt)
+            };
+            let mix_u256: u256 = mix.into();
+
             let mut chunk_indices: Array<u8> = array![];
             let mut chunks: Array<u256> = array![];
             let mut i: u8 = 0;
@@ -373,6 +388,7 @@ pub mod actions {
             //   we'd re-read the same pack 10× for 10 consecutive candidates.
             let mut pattern_seen: u256 = 0;
             let mut pattern_counts: Felt252Dict<u32> = Default::default();
+            let mut pattern_stream: Array<u8> = array![];
             let mut ordinal: u32 = 0;
             let mut cached_pack_id: u32 = 0xFFFFFFFF;
             let mut cached_pack: u256 = 0;
@@ -397,6 +413,7 @@ pub mod actions {
                         let shifted: u256 = cached_pack / TwoPower::pow(pack_slot * 25);
                         let target: u32 = (shifted % 0x2000000_u256).try_into().unwrap();
                         let pattern = compute_pattern(guess_letters, target);
+                        append_pattern_to_stream(ref pattern_stream, pattern);
                         let mask = TwoPower::pow(pattern);
                         if (pattern_seen / mask) % 2 == 0 {
                             pattern_seen += mask;
@@ -415,23 +432,9 @@ pub mod actions {
             // ---- Pick a ~size^0.8-weighted non-empty pattern via VRF ----
             let bucket_count: u32 = Bitmap::popcount(pattern_seen).into();
             assert(bucket_count > 0, Errors::NO_CANDIDATES);
-            // Salt depends on mode:
-            //   - Practice (mode 0): salt = poseidon(game_id, turn, word_id)
-            //     so each free run has its own deterministic lazy-boss tree.
-            //   - NFT (mode 1):   salt = poseidon(token_id, turn, word_id)
-            //     so each token is its own unique game.
-            // The client must encode the SAME salt into its request_random
-            // preamble call when VRF is enabled or consume_random reverts.
-            let salt: felt252 = poseidon_hash_span(
-                [game_id, game.guesses_used.into(), word_id.into()].span(),
-            );
-            let vrf_addr = self.vrf_address.read();
-            let mix = if vrf_addr.is_zero() {
-                salt
-            } else {
-                random_from(vrf_addr, salt)
-            };
-            let mix_u256: u256 = mix.into();
+            // `mix_u256` was consumed before the expensive bucket scan using
+            // salt = poseidon(game_id, turn, word_id). The client must encode
+            // the same salt into its request_random preamble.
 
             let mut total_weight: u32 = 0;
             let mut pattern_code: u8 = 0;
@@ -466,8 +469,7 @@ pub mod actions {
             let mut total_remaining: u32 = 0;
             let mut first_surviving: u32 = Bounded::<u32>::MAX;
             let mut new_active_chunks: u256 = 0;
-            let mut cached_pack_id: u32 = 0xFFFFFFFF;
-            let mut cached_pack: u256 = 0;
+            ordinal = 0;
 
             let mut active_index: u32 = 0;
             while active_index < chunks.len() {
@@ -479,17 +481,7 @@ pub mod actions {
                 while bits > 0 {
                     if (bits % 2) == 1 {
                         let candidate_id: u32 = chunk_base + bit_idx;
-                        let pack_id: u32 = candidate_id / 10;
-                        if pack_id != cached_pack_id {
-                            cached_pack = store
-                                .word_pack(pack_id.try_into().unwrap())
-                                .packed;
-                            cached_pack_id = pack_id;
-                        }
-                        let pack_slot: u8 = (candidate_id % 10).try_into().unwrap();
-                        let shifted: u256 = cached_pack / TwoPower::pow(pack_slot * 25);
-                        let target: u32 = (shifted % 0x2000000_u256).try_into().unwrap();
-                        let pattern = compute_pattern(guess_letters, target);
+                        let pattern = read_pattern_from_stream(@pattern_stream, ordinal);
                         if pattern == chosen_pattern {
                             new_bits = new_bits + TwoPower::pow(bit_idx.try_into().unwrap());
                             total_remaining += 1;
@@ -497,6 +489,7 @@ pub mod actions {
                                 first_surviving = candidate_id;
                             }
                         }
+                        ordinal += 1;
                     }
                     bits = bits / 2;
                     bit_idx += 1;

@@ -23,8 +23,13 @@ const nftNamespace = (env.VITE_PUBLIC_NAMESPACE_NFT as string | undefined) ?? "z
 const practiceNamespace =
   (env.VITE_PUBLIC_NAMESPACE_PRACTICE as string | undefined) ?? "zordle_0_1";
 
+// Which dojo profile (= which manifest_<profile>.json) the NFT/ranked mode
+// should resolve addresses against. Set by the deploy scripts; defaults to
+// "sepolia" so existing .env.sepolia files keep working unchanged.
+const nftProfile = (env.VITE_PUBLIC_DOJO_PROFILE as string | undefined) ?? "sepolia";
+
 const nftActions =
-  contractAddressFromManifest("sepolia", nftNamespace, "actions") ??
+  contractAddressFromManifest(nftProfile, nftNamespace, "actions") ??
   (env.VITE_PUBLIC_ACTIONS_ADDRESS_NFT as string | undefined) ??
   legacyActions ??
   "";

@@ -1,8 +1,9 @@
-// Cartridge Controller connector — Sepolia v1.
+// Cartridge Controller connector.
 //
-// Slimmer than zkube's because we only ship one chain (Sepolia) and one
-// contract (actions). Policies are hardcoded against env-supplied
-// addresses so we don't need a manifest_sepolia.json import at build time.
+// Slimmer than zkube's because we only ship one contract (actions) and
+// pick the chain via VITE_PUBLIC_DOJO_PROFILE (sepolia or mainnet).
+// Policies are hardcoded against env-supplied addresses so we don't need
+// a manifest_<profile>.json import at build time.
 
 import type { Connector } from "@starknet-react/core";
 import ControllerConnector from "@cartridge/connector/controller";
@@ -23,6 +24,7 @@ type SessionPolicies = {
 import { shortString } from "starknet";
 
 const SEPOLIA_CHAIN_ID = "SN_SEPOLIA";
+const MAINNET_CHAIN_ID = "SN_MAIN";
 const SEPOLIA_RPC_URL = "https://api.cartridge.gg/x/starknet/sepolia";
 const MAINNET_RPC_URL = "https://api.cartridge.gg/x/starknet/mainnet";
 
@@ -30,12 +32,16 @@ const MAINNET_RPC_URL = "https://api.cartridge.gg/x/starknet/mainnet";
 const VRF_ADDRESS =
   "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f";
 
+const NFT_PROFILE =
+  (import.meta.env.VITE_PUBLIC_DOJO_PROFILE as string | undefined) ?? "sepolia";
+const DEFAULT_CHAIN_ID = NFT_PROFILE === "mainnet" ? MAINNET_CHAIN_ID : SEPOLIA_CHAIN_ID;
+
 const NAMESPACE =
   import.meta.env.VITE_PUBLIC_NAMESPACE_NFT ??
   import.meta.env.VITE_PUBLIC_NAMESPACE ??
   "zordle_0_1";
 const ACTIONS_ADDRESS =
-  contractAddressFromManifest("sepolia", NAMESPACE, "actions") ??
+  contractAddressFromManifest(NFT_PROFILE, NAMESPACE, "actions") ??
   import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS_NFT ??
   import.meta.env.VITE_PUBLIC_ACTIONS_ADDRESS ??
   "0x1";
@@ -74,7 +80,7 @@ const signupOptions: AuthOptions = ["google", "discord", "webauthn", "password"]
 
 const options: ControllerOptions = {
   chains: [{ rpcUrl: SEPOLIA_RPC_URL }, { rpcUrl: MAINNET_RPC_URL }],
-  defaultChainId: stringToFelt(SEPOLIA_CHAIN_ID).toString(),
+  defaultChainId: stringToFelt(DEFAULT_CHAIN_ID).toString(),
   namespace: NAMESPACE,
   slot: SLOT,
   policies,

@@ -1,6 +1,7 @@
 # Deploy runbook
 
-Three deploy targets: local dev, Cartridge practice slot, Sepolia NFT mode.
+Four deploy targets: local dev, Cartridge practice slot, Sepolia NFT mode,
+Mainnet NFT mode.
 
 ## Profiles
 
@@ -11,10 +12,12 @@ Each environment has its own Dojo profile and config:
 | Local Katana | `dev` | `dojo_dev.toml` | `manifest_dev.json` (gitignored) |
 | Practice slot | `slot` | `dojo_slot.toml` | `manifest_slot.json` (tracked) |
 | Sepolia | `sepolia` | `dojo_sepolia.toml` | `manifest_sepolia.json` (tracked) |
+| Mainnet | `mainnet` | `dojo_mainnet.toml` | `manifest_mainnet.json` (tracked) |
 
-`manifest_slot.json` and `manifest_sepolia.json` are tracked so contributors
-can run the client against the live worlds without re-deploying.
-`manifest_dev.json` differs per machine and stays gitignored.
+`manifest_slot.json`, `manifest_sepolia.json`, and `manifest_mainnet.json`
+are tracked so contributors can run the client against the live worlds
+without re-deploying. `manifest_dev.json` differs per machine and stays
+gitignored.
 
 ## Local dev
 
@@ -114,6 +117,55 @@ Drives `sozo migrate -P sepolia` against Sepolia, deploys the Denshokan
 minigame component, writes `client/.env.sepolia`. NFT mint flow is gated by
 the Denshokan contract referenced in `.env.sepolia.example`.
 
+## Mainnet (NFT mode)
+
+Same shape as Sepolia, but with explicit guardrails because every tx is real
+STRK and the world creation is irreversible.
+
+### Pre-deploy
+
+1. Verify `dojo_mainnet.toml`'s `zordle_0_1-actions` `init_call_args` uses
+   the known mainnet MinigameToken address:
+   `0x00263cc540dac11334470a64759e03952ee2f84a290e99ba8cbc391245cd0bf9`.
+   The deploy script aborts if it finds anything else.
+2. Fund the deployer address with enough STRK for migrate + the batched
+   dictionary load. See gas reference below.
+
+### Required env
+
+```bash
+MAINNET_CONFIRM=YES          # explicit go-ahead, real money
+DEPLOYER_ADDRESS=0x...       # mainnet account paying for migration + dict load
+DEPLOYER_PRIVATE_KEY=0x...   # matching key
+```
+
+### Run
+
+```bash
+MAINNET_CONFIRM=YES \
+DEPLOYER_ADDRESS=0x... \
+DEPLOYER_PRIVATE_KEY=0x... \
+  bash scripts/deploy_mainnet.sh
+```
+
+Same shape as `deploy_sepolia.sh`: `sozo build -P mainnet` →
+`sozo migrate -P mainnet` (5x retry/backoff) → write
+`manifest_mainnet.json` and `client/.env.mainnet` with the current practice
+slot carryover → `load_dictionary.mjs` (batched, idempotent, skips if
+`loaded == 1`). Re-running on the same world is safe; class upgrades migrate
+incrementally.
+
+### Client
+
+```bash
+cd client && pnpm install && pnpm dev --mode mainnet
+```
+
+Vite mode `mainnet` loads `client/.env.mainnet`. The
+`VITE_PUBLIC_DOJO_PROFILE=mainnet` env var routes `networkConfig.ts` and
+`cartridgeConnector.ts` to `manifest_mainnet.json` and the `SN_MAIN`
+chain.
+
 ## Common pitfalls
 
 - **Forgot to bump the seed after a model change** → "Invalid new schema"
@@ -131,13 +183,12 @@ the Denshokan contract referenced in `.env.sepolia.example`.
 
 ## Gas reference
 
-Approximate slot-measured costs (extrapolated to mainnet at
-~$9.24×10⁻¹⁰/l2_gas):
+Approximate observed costs:
 
 | Action | l2_gas | Mainnet ≈ |
 |---|---|---|
 | `start_practice` | 5.30M | $0.005 |
-| `guess` turn 1 (full 2315 walk) | ~1.4B | ~$1.30 |
-| `guess` turn 2+ (narrowed) | 30–270M | $0.03–$0.25 |
+| `guess` turn 1 (full 2315 walk) | ~924M | ~$0.85 |
+| `guess` turn 2+ (narrowed) | ~309M | ~$0.29 |
 
-Per-game total typically $1.30–$1.70 mainnet.
+Per-game total typically depends on how quickly the candidate set narrows.

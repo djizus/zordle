@@ -29,5 +29,9 @@ sierra-replace-ids = true
 # differences (RPC, seed) live in dojo_sepolia.toml.
 [profile.sepolia]
 
+# Mainnet release profile — same Cairo settings as sepolia. World-level
+# differences (RPC, seed) live in dojo_mainnet.toml.
+[profile.mainnet]
+
 # Cartridge Katana slot profile for loginless daily play.
 [profile.slot]

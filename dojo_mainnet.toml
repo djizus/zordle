@@ -1,0 +1,38 @@
+[world]
+name = "Zordle"
+description = "Lazy adversarial Wordle on Dojo (Mainnet v1)"
+seed = "zordle_mainnet_v1"
+
+[namespace]
+default = "zordle_0_1"
+
+[writers]
+"zordle_0_1" = ["zordle_0_1-actions", "zordle_0_1-setup"]
+
+[env]
+rpc_url = "https://api.cartridge.gg/x/starknet/mainnet"
+# account_address and private_key are intentionally omitted from this file.
+# The deploy script (scripts/deploy_mainnet.sh) reads DEPLOYER_ADDRESS and
+# DEPLOYER_PRIVATE_KEY from the shell environment and passes them as
+# --account-address / --private-key flags to sozo, so secrets never land in
+# version control.
+
+# Wires the actions contract to Cartridge's shared infrastructure on Mainnet:
+#   - creator: replaced at deploy time by deploy_mainnet.sh with the deployer
+#     address (used by Denshokan for game-creator metadata).
+#   - Denshokan: shared MinigameToken contract on mainnet. deploy_mainnet.sh
+#     verifies this exact mainnet address before spending real STRK.
+#   - renderer: 0x1 == Option::None — fall back to Denshokan's default SVG.
+#   - VRF: Cartridge VRF — same address on Sepolia and Mainnet.
+[init_call_args]
+"zordle_0_1-actions" = [
+    "0x047dc688Abc3E6e58ed9F0171dE5aeCd22C08E8A08c469B2bb2267C9E7af1813",
+    "0x00263cc540dac11334470a64759e03952ee2f84a290e99ba8cbc391245cd0bf9",
+    "0x1",
+    "0x051fea4450da9d6aee758bdeba88b2f665bcbf549d2c61421aa724e9ac0ced8f",
+]
+# scripts/deploy_mainnet.sh replaces this with DEPLOYER_ADDRESS before
+# running `sozo migrate`, then restores the checked-in file.
+"zordle_0_1-setup" = [
+    "0x047dc688Abc3E6e58ed9F0171dE5aeCd22C08E8A08c469B2bb2267C9E7af1813",
+]
