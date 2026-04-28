@@ -347,6 +347,21 @@ pub mod actions {
             // using the per-game active chunk mask.
             let active_chunks = game.active_chunks;
             assert(active_chunks != 0, Errors::NO_CANDIDATES);
+
+            // Consume VRF as soon as the guess has passed cheap validity
+            // checks. If later bucket work fails, the provider has still
+            // been consumed and the surfaced revert points at the guess.
+            let salt: felt252 = poseidon_hash_span(
+                [game_id, game.guesses_used.into(), word_id.into()].span(),
+            );
+            let vrf_addr = self.vrf_address.read();
+            let mix = if vrf_addr.is_zero() {
+                salt
+            } else {
+                random_from(vrf_addr, salt)
+            };
+            let mix_u256: u256 = mix.into();
+
             let mut chunk_indices: Array<u8> = array![];
             let mut chunks: Array<u256> = array![];
             let mut i: u8 = 0;
@@ -415,23 +430,9 @@ pub mod actions {
             // ---- Pick a ~size^0.8-weighted non-empty pattern via VRF ----
             let bucket_count: u32 = Bitmap::popcount(pattern_seen).into();
             assert(bucket_count > 0, Errors::NO_CANDIDATES);
-            // Salt depends on mode:
-            //   - Practice (mode 0): salt = poseidon(game_id, turn, word_id)
-            //     so each free run has its own deterministic lazy-boss tree.
-            //   - NFT (mode 1):   salt = poseidon(token_id, turn, word_id)
-            //     so each token is its own unique game.
-            // The client must encode the SAME salt into its request_random
-            // preamble call when VRF is enabled or consume_random reverts.
-            let salt: felt252 = poseidon_hash_span(
-                [game_id, game.guesses_used.into(), word_id.into()].span(),
-            );
-            let vrf_addr = self.vrf_address.read();
-            let mix = if vrf_addr.is_zero() {
-                salt
-            } else {
-                random_from(vrf_addr, salt)
-            };
-            let mix_u256: u256 = mix.into();
+            // `mix_u256` was consumed before the expensive bucket scan using
+            // salt = poseidon(game_id, turn, word_id). The client must encode
+            // the same salt into its request_random preamble.
 
             let mut total_weight: u32 = 0;
             let mut pattern_code: u8 = 0;

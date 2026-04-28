@@ -20,7 +20,7 @@ import {
   useAccount,
   useDisconnect,
 } from "@starknet-react/core";
-import { num } from "starknet";
+import { num, type AccountInterface } from "starknet";
 
 import { decodePattern, type Trit } from "./chain/state";
 import {
@@ -116,8 +116,36 @@ const letterStatus = (past: PastGuess[]): Map<string, Trit> => {
   return map;
 };
 
-const errorMessage = (err: unknown): string =>
-  err instanceof Error ? err.message : String(err);
+const errorMessage = (err: unknown): string => {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && err !== null) {
+    const anyErr = err as any;
+    return (
+      anyErr.message ??
+      anyErr.revert_reason ??
+      anyErr.revertReason ??
+      anyErr.execution_error ??
+      JSON.stringify(err)
+    );
+  }
+  return String(err);
+};
+
+const waitForSuccess = async (account: AccountInterface, transactionHash: string) => {
+  const receipt = await account.waitForTransaction(transactionHash);
+  const status = (receipt as any)?.execution_status ?? (receipt as any)?.executionStatus;
+  if (status && status !== "SUCCEEDED") {
+    console.error("transaction failed", { transactionHash, receipt });
+    const reason =
+      (receipt as any)?.revert_reason ??
+      (receipt as any)?.revertReason ??
+      (receipt as any)?.execution_error ??
+      (receipt as any)?.finality_status ??
+      status;
+    throw new Error(`transaction ${status.toLowerCase()}: ${reason}`);
+  }
+  return receipt;
+};
 
 function ToastStack({
   toasts,
@@ -699,7 +727,7 @@ function Play({
             setMessage(<>starting<span className="dots"></span></>);
             setTxPending(true);
             const tx = await startPractice(network, account);
-            await account.waitForTransaction(tx.transaction_hash);
+            await waitForSuccess(account, tx.transaction_hash);
             if (cancelled) return;
             id = await getActiveGameId(network, address);
             if (id === 0n) throw new Error("practice game did not start");
@@ -723,9 +751,10 @@ function Play({
           try {
             if (tokenId === null) throw new Error("missing NFT token id");
             const tx = await startNftGame(network, account, tokenId);
-            await account.waitForTransaction(tx.transaction_hash);
+            await waitForSuccess(account, tx.transaction_hash);
             setMessage(<>guess <span className="accent">1</span> of 6</>);
           } catch (err) {
+            console.error("start game failed", err);
             onToast(errorMessage(err));
           } finally {
             if (!cancelled) setTxPending(false);
@@ -798,8 +827,11 @@ function Play({
     setTxPending(true);
     try {
       const tx = await submitGuess(network, account, gameId, tokenId, guessesUsed, wid);
-      await account.waitForTransaction(tx.transaction_hash);
+      await waitForSuccess(account, tx.transaction_hash);
       const g = await getGuess(network, gameId, guessesUsed);
+      if (g.gameId !== gameId || g.index !== guessesUsed || g.wordId !== wid) {
+        throw new Error("guess transaction did not update game state");
+      }
       const game = await getGame(network, gameId);
       const newPast = [...past, { word: submitted, pattern: g.pattern }];
       setPast(newPast);
@@ -812,6 +844,7 @@ function Play({
         setPhase("ending");
       }
     } catch (err) {
+      console.error("submit guess failed", err);
       onToast(errorMessage(err));
     } finally {
       setTxPending(false);
