@@ -6,6 +6,7 @@
     "dev": "vite",
     "slot": "vite --mode slot --host",
     "sepolia": "vite --mode sepolia",
+    "mainnet": "vite --mode mainnet",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
