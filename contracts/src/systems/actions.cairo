@@ -62,7 +62,7 @@ pub mod actions {
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_tx_info};
     use zordle::constants::{CHUNK_BITS, DEFAULT_NS, MAX_GUESSES, NUM_CHUNKS};
-    use zordle::helpers::bitmap::Bitmap;
+    use zordle::helpers::bitmap::{append_pattern_to_stream, read_pattern_from_stream, Bitmap};
     use zordle::helpers::power::TwoPower;
     use zordle::helpers::random::random_from;
     use zordle::helpers::wordle::compute_pattern;
@@ -388,6 +388,7 @@ pub mod actions {
             //   we'd re-read the same pack 10× for 10 consecutive candidates.
             let mut pattern_seen: u256 = 0;
             let mut pattern_counts: Felt252Dict<u32> = Default::default();
+            let mut pattern_stream: Array<u8> = array![];
             let mut ordinal: u32 = 0;
             let mut cached_pack_id: u32 = 0xFFFFFFFF;
             let mut cached_pack: u256 = 0;
@@ -412,6 +413,7 @@ pub mod actions {
                         let shifted: u256 = cached_pack / TwoPower::pow(pack_slot * 25);
                         let target: u32 = (shifted % 0x2000000_u256).try_into().unwrap();
                         let pattern = compute_pattern(guess_letters, target);
+                        append_pattern_to_stream(ref pattern_stream, pattern);
                         let mask = TwoPower::pow(pattern);
                         if (pattern_seen / mask) % 2 == 0 {
                             pattern_seen += mask;
@@ -467,8 +469,7 @@ pub mod actions {
             let mut total_remaining: u32 = 0;
             let mut first_surviving: u32 = Bounded::<u32>::MAX;
             let mut new_active_chunks: u256 = 0;
-            let mut cached_pack_id: u32 = 0xFFFFFFFF;
-            let mut cached_pack: u256 = 0;
+            ordinal = 0;
 
             let mut active_index: u32 = 0;
             while active_index < chunks.len() {
@@ -480,17 +481,7 @@ pub mod actions {
                 while bits > 0 {
                     if (bits % 2) == 1 {
                         let candidate_id: u32 = chunk_base + bit_idx;
-                        let pack_id: u32 = candidate_id / 10;
-                        if pack_id != cached_pack_id {
-                            cached_pack = store
-                                .word_pack(pack_id.try_into().unwrap())
-                                .packed;
-                            cached_pack_id = pack_id;
-                        }
-                        let pack_slot: u8 = (candidate_id % 10).try_into().unwrap();
-                        let shifted: u256 = cached_pack / TwoPower::pow(pack_slot * 25);
-                        let target: u32 = (shifted % 0x2000000_u256).try_into().unwrap();
-                        let pattern = compute_pattern(guess_letters, target);
+                        let pattern = read_pattern_from_stream(@pattern_stream, ordinal);
                         if pattern == chosen_pattern {
                             new_bits = new_bits + TwoPower::pow(bit_idx.try_into().unwrap());
                             total_remaining += 1;
@@ -498,6 +489,7 @@ pub mod actions {
                                 first_surviving = candidate_id;
                             }
                         }
+                        ordinal += 1;
                     }
                     bits = bits / 2;
                     bit_idx += 1;
