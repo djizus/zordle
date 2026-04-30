@@ -130,7 +130,7 @@ pub mod actions {
                     "zKorp",
                     "zKorp",
                     "Word Puzzle",
-                    "https://zordle.zkorp.xyz/zkorp-cube.png",
+                    "https://raw.githubusercontent.com/z-korp/zordle/refs/heads/main/client/public/zordle_logo.png",
                     Option::Some("#A9D8FF"),
                     Option::None,
                     renderer_address,
