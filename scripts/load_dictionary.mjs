@@ -137,7 +137,17 @@ if (RESET_DICTIONARY) {
   await provider.waitForTransaction(transaction_hash);
 }
 
-for (let i = 0; i < packs.length; i += PACK_BATCH) {
+// START_PACK_INDEX lets you resume mid-load after a partial run (e.g. mainnet
+// out-of-funds). Must be a multiple of PACK_BATCH and < total packs.
+const START_PACK_INDEX = Number(process.env.START_PACK_INDEX ?? 0);
+if (!Number.isInteger(START_PACK_INDEX) || START_PACK_INDEX < 0 || START_PACK_INDEX % PACK_BATCH !== 0) {
+  throw new Error(`START_PACK_INDEX must be a non-negative multiple of ${PACK_BATCH}, got ${START_PACK_INDEX}`);
+}
+if (START_PACK_INDEX > 0) {
+  console.log(`Resuming from pack ${START_PACK_INDEX} (${PACK_COUNT - START_PACK_INDEX} packs left)`);
+}
+
+for (let i = START_PACK_INDEX; i < packs.length; i += PACK_BATCH) {
   const batch = packs.slice(i, i + PACK_BATCH).map(toU256);
   process.stdout.write(
     `  packs ${String(i).padStart(4)}..${String(i + batch.length - 1).padStart(4)}... `,

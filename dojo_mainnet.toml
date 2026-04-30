@@ -1,7 +1,7 @@
 [world]
 name = "Zordle"
 description = "Lazy adversarial Wordle on Dojo (Mainnet v1)"
-seed = "zordle_mainnet_v1"
+seed = "zordle_mainnet_v1_1"
 
 [namespace]
 default = "zordle_0_1"
@@ -10,7 +10,7 @@ default = "zordle_0_1"
 "zordle_0_1" = ["zordle_0_1-actions", "zordle_0_1-setup"]
 
 [env]
-rpc_url = "https://api.cartridge.gg/x/starknet/mainnet"
+rpc_url = "https://api.cartridge.gg/x/starknet/mainnet/rpc/v0_9"
 # account_address and private_key are intentionally omitted from this file.
 # The deploy script (scripts/deploy_mainnet.sh) reads DEPLOYER_ADDRESS and
 # DEPLOYER_PRIVATE_KEY from the shell environment and passes them as
